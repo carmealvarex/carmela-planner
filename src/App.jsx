@@ -44,6 +44,25 @@ const SALONES_FIJOS = ["Salón Argos", "Sala España", "Sala 1", "Sala 2", "Sal�
 
 const VALE_TIPOS = ["Coffee break", "Almuerzo", "Cena", "Desayuno", "Brindis", "Otro"];
 
+const VALE_MOTIVOS = ["Cortesía", "Salón sin cobro", "Descuento interno", "Cubiertos de cortesía", "Otro"];
+
+const ESTADOS_PAGO = [
+  ["pendiente", "Pendiente"],
+  ["parcial", "Pago Parcial"],
+  ["pagado", "Pagado"],
+  ["total", "Pago Total"],
+];
+
+// Franjas horarias de 06:00 a 23:00 cada 30 minutos, para el desplegable de horarios
+const FRANJAS_HORARIAS = (() => {
+  const out = [];
+  for (let h = 6; h <= 23; h++) {
+    out.push(`${String(h).padStart(2, "0")}:00`);
+    if (h < 23) out.push(`${String(h).padStart(2, "0")}:30`);
+  }
+  return out;
+})();
+
 const COLORES_EVENTO = [
   { nombre: "Rosa marca", valor: "#AE8983" },
   { nombre: "Verde", valor: "#5C7A5E" },
@@ -101,7 +120,7 @@ function getMonthGrid(year, month) {
    ============================================================ */
 function estadoTexto(ev) {
   if (ev.estadoPago === "pagado") return "Pagado ✅";
-  if (ev.estadoPago === "cp") return "Pendiente de facturación previa al evento 🧾";
+  if (ev.estadoPago === "total") return "Pago total ✅";
   if (ev.estadoPago === "parcial") {
     const total = Number(ev.monto) || 0;
     const pagado = Number(ev.adelanto) || 0;
@@ -227,16 +246,23 @@ function blankEvent(fecha) {
   return {
     id: uid(), fecha: fecha || toISO(new Date()), salon: "", salonOtro: "",
     horaInicio: "09:00", horaFin: "13:00", horaArmado: "", horaDesarme: "",
+    horaInicioManual: false, horaFinManual: false, horaArmadoManual: false, horaDesarmeManual: false,
     nombreEvento: "",
     personas: "", servicio: "", incluye: [], tecnica: [],
     formatoArmado: "",
     colorEvento: "",
     tarifaTipo: "completa",
+    tarifaEspecialActiva: false, tarifaEspecial: "",
+    valorSalon: "", // snapshot histórico del valor de salón aplicado al momento de guardar
     empresaOrganiza: "", empresaContrata: "", empresaPaga: "",
+    contactoNombre: "", contactoVia: "",
+    esHuesped: false,
     estadoPago: "pendiente", monto: "", adelanto: "", comprobanteTexto: "", comprobanteLink: "",
+    retenciones: "no",
     precioPorPersona: "",
     itemsPresupuesto: [],
-    vale: { numero: "", tipo: "Coffee break", cantidad: "", precioUnitario: "", concepto: "" },
+    generarVale: false,
+    vale: { numero: "", motivo: "Cortesía", cantidad: "", precioUnitario: "", salonPerdido: false, concepto: "" },
     comanda: { cubiertos: "", detalle: "" },
     cronograma: [],
     planoDibujo: "",
@@ -262,11 +288,33 @@ const inputStyle = {
   background: CARD, fontFamily: FONT_BODY, fontSize: 14, color: INK,
 };
 
+// Selector de horario: desplegable de franjas 06:00–23:00, con opción de ingreso manual
+function HoraField({ value, onChange, manual, onManualToggle }) {
+  const esFranja = FRANJAS_HORARIAS.includes(value);
+  const modoManual = manual || (!!value && !esFranja);
+  return (
+    <div>
+      {!modoManual ? (
+        <select style={inputStyle} value={esFranja ? value : ""} onChange={e => onChange(e.target.value)}>
+          <option value="">Elegir horario…</option>
+          {FRANJAS_HORARIAS.map(h => <option key={h} value={h}>{h}</option>)}
+        </select>
+      ) : (
+        <input style={inputStyle} value={value} onChange={e => onChange(e.target.value)} placeholder="Ej: 20:15 hs" />
+      )}
+      <button type="button" onClick={() => onManualToggle(!modoManual)}
+        className="text-xs mt-1" style={{ color: ACCENT, fontFamily: FONT_BODY }}>
+        {modoManual ? "Elegir de la lista" : "Ingresar manualmente"}
+      </button>
+    </div>
+  );
+}
+
 function Stamp({ estadoPago }) {
   const map = {
     pagado: { color: PAGADO, label: "Pagado" },
-    cp: { color: CP_COLOR, label: "CP · Vale" },
-    parcial: { color: PARCIAL, label: "Parcial · Seña" },
+    total: { color: PAGADO, label: "Pago Total" },
+    parcial: { color: PARCIAL, label: "Pago Parcial" },
     pendiente: { color: PENDIENTE, label: "Pendiente" },
   };
   const s = map[estadoPago] || map.pendiente;
@@ -396,8 +444,8 @@ function MonthView({ year, month, events, onPrev, onNext, onDayClick }) {
                   <div style={{ fontFamily: FONT_MONO, fontSize: 11, color: INK }}>{d.getDate()}</div>
                   <div className="flex flex-col gap-0.5 mt-1">
                     {evs.slice(0, 3).map(e => {
-                      const bg = e.colorEvento || (e.estadoPago === "pagado" ? PAGADO_BG : e.estadoPago === "cp" ? CP_BG : e.estadoPago === "parcial" ? PARCIAL_BG : PENDIENTE_BG);
-                      const fg = e.colorEvento ? "#fff" : (e.estadoPago === "pagado" ? PAGADO : e.estadoPago === "cp" ? CP_COLOR : e.estadoPago === "parcial" ? PARCIAL : PENDIENTE);
+                      const bg = e.colorEvento || ((e.estadoPago === "pagado" || e.estadoPago === "total") ? PAGADO_BG : e.estadoPago === "parcial" ? PARCIAL_BG : PENDIENTE_BG);
+                      const fg = e.colorEvento ? "#fff" : ((e.estadoPago === "pagado" || e.estadoPago === "total") ? PAGADO : e.estadoPago === "parcial" ? PARCIAL : PENDIENTE);
                       return (
                         <div key={e.id} className="truncate rounded px-1" style={{ fontSize: 10, background: bg, color: fg, fontFamily: FONT_BODY }}>
                           {e.nombreEvento || e.salon || "Evento"}
@@ -518,7 +566,12 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
   const tarifaSalon = tarifas?.[salonFinal];
   const tarifaValor = ev.tarifaTipo === "completa" ? tarifaSalon?.completa : tarifaSalon?.media;
 
-  const guardar = () => onSave({ ...ev, salon: salonFinal });
+  // Valor de salón que se va a aplicar y congelar en esta ficha (histórico):
+  // si ya existía un valorSalon guardado (evento ya creado) y la tarifa especial/tipo no cambió,
+  // se respeta; si es un evento nuevo o se tocó la tarifa, se recalcula una sola vez al guardar.
+  const valorSalonAplicar = ev.tarifaEspecialActiva ? (Number(ev.tarifaEspecial) || 0) : (Number(tarifaValor) || 0);
+
+  const guardar = () => onSave({ ...ev, salon: salonFinal, valorSalon: valorSalonAplicar });
 
   return (
     <div className="p-5 rounded" style={{ background: CARD, border: `1px solid ${LINE}` }}>
@@ -538,10 +591,18 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
           </select>
           {ev.salon === "Otro" && <input style={{ ...inputStyle, marginTop: 8 }} placeholder="Nombre del salón" value={ev.salonOtro} onChange={e => set("salonOtro", e.target.value)} />}
         </Field>
-        <Field label="Hora inicio (24hs)"><input type="time" step="60" lang="es-AR" style={inputStyle} value={ev.horaInicio} onChange={e => set("horaInicio", e.target.value)} /></Field>
-        <Field label="Hora fin (24hs)"><input type="time" step="60" lang="es-AR" style={inputStyle} value={ev.horaFin} onChange={e => set("horaFin", e.target.value)} /></Field>
-        <Field label="Hora de armado (opcional, 24hs)"><input type="time" step="60" lang="es-AR" style={inputStyle} value={ev.horaArmado || ""} onChange={e => set("horaArmado", e.target.value)} /></Field>
-        <Field label="Hora de desarme (opcional, 24hs)"><input type="time" step="60" lang="es-AR" style={inputStyle} value={ev.horaDesarme || ""} onChange={e => set("horaDesarme", e.target.value)} /></Field>
+        <Field label="Hora inicio">
+          <HoraField value={ev.horaInicio} onChange={v => set("horaInicio", v)} manual={ev.horaInicioManual} onManualToggle={v => set("horaInicioManual", v)} />
+        </Field>
+        <Field label="Hora fin">
+          <HoraField value={ev.horaFin} onChange={v => set("horaFin", v)} manual={ev.horaFinManual} onManualToggle={v => set("horaFinManual", v)} />
+        </Field>
+        <Field label="Hora de armado (opcional)">
+          <HoraField value={ev.horaArmado || ""} onChange={v => set("horaArmado", v)} manual={ev.horaArmadoManual} onManualToggle={v => set("horaArmadoManual", v)} />
+        </Field>
+        <Field label="Hora de desarme (opcional)">
+          <HoraField value={ev.horaDesarme || ""} onChange={v => set("horaDesarme", v)} manual={ev.horaDesarmeManual} onManualToggle={v => set("horaDesarmeManual", v)} />
+        </Field>
         <Field label="Personas"><input type="number" style={inputStyle} value={ev.personas} onChange={e => set("personas", e.target.value)} /></Field>
         <Field label="Concepto"><input style={inputStyle} value={ev.servicio} onChange={e => set("servicio", e.target.value)} placeholder="Ej: cena" /></Field>
       </div>
@@ -564,15 +625,27 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
       </Field>
 
       <Field label="Tarifa del salón">
-        <div className="flex gap-3 items-center">
-          <label className="flex items-center gap-1.5"><input type="radio" checked={ev.tarifaTipo === "completa"} onChange={() => set("tarifaTipo", "completa")} /><span style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK }}>Tarifa completa</span></label>
-          <label className="flex items-center gap-1.5"><input type="radio" checked={ev.tarifaTipo === "media"} onChange={() => set("tarifaTipo", "media")} /><span style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK }}>Media tarifa</span></label>
-          {salonFinal && (
+        <div className="flex gap-3 items-center flex-wrap">
+          <label className="flex items-center gap-1.5"><input type="radio" disabled={ev.tarifaEspecialActiva} checked={ev.tarifaTipo === "completa"} onChange={() => set("tarifaTipo", "completa")} /><span style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK }}>Tarifa completa</span></label>
+          <label className="flex items-center gap-1.5"><input type="radio" disabled={ev.tarifaEspecialActiva} checked={ev.tarifaTipo === "media"} onChange={() => set("tarifaTipo", "media")} /><span style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK }}>Media tarifa</span></label>
+          {salonFinal && !ev.tarifaEspecialActiva && (
             <span style={{ fontFamily: FONT_MONO, fontSize: 12.5, color: ACCENT, marginLeft: "auto" }}>
               {tarifaValor ? `$ ${tarifaValor}` : "Sin tarifa configurada en Ajustes"}
             </span>
           )}
         </div>
+        <div className="mt-2 p-2.5 rounded" style={{ background: HILITE_BG, border: `1px solid ${LINE}` }}>
+          <label className="flex items-center gap-1.5 mb-2">
+            <input type="checkbox" checked={!!ev.tarifaEspecialActiva} onChange={e => set("tarifaEspecialActiva", e.target.checked)} />
+            <span style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK, fontWeight: 600 }}>Usar tarifa especial (ignora el tarifario base)</span>
+          </label>
+          {ev.tarifaEspecialActiva && (
+            <input type="number" style={inputStyle} value={ev.tarifaEspecial} onChange={e => set("tarifaEspecial", e.target.value)} placeholder="Valor especial del salón $ (neto)" />
+          )}
+        </div>
+        <p style={{ fontFamily: FONT_BODY, fontSize: 11, color: MUTED, marginTop: 6 }}>
+          El valor de salón que quede aplicado (especial o de tarifario) se guarda tal cual con la ficha: si el tarifario general cambia más adelante, este evento ya realizado no se ve afectado.
+        </p>
       </Field>
 
       <Field label="Incluye (catering / comida)">
@@ -623,6 +696,15 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
         <Field label="Empresa que paga"><input style={inputStyle} value={ev.empresaPaga} onChange={e => set("empresaPaga", e.target.value)} /></Field>
       </div>
 
+      <div className="grid grid-cols-2 gap-x-4">
+        <Field label="Nombre del contacto"><input style={inputStyle} value={ev.contactoNombre || ""} onChange={e => set("contactoNombre", e.target.value)} placeholder="Ej: María Gómez" /></Field>
+        <Field label="Vía / número de contacto"><input style={inputStyle} value={ev.contactoVia || ""} onChange={e => set("contactoVia", e.target.value)} placeholder="Email o teléfono" /></Field>
+      </div>
+
+      <Field label="Hospedaje">
+        <Toggle checked={!!ev.esHuesped} onChange={v => set("esHuesped", v)} label="El cliente del evento es huésped del hotel" />
+      </Field>
+
       <div className="p-3 rounded mb-4" style={{ background: HILITE_BG, border: `1px solid ${LINE}` }}>
         <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: MUTED, marginBottom: 10 }}>Ítems del presupuesto (tabla del voucher, ej: salón, lunch, coffee break)</p>
         {(ev.itemsPresupuesto || []).length > 0 && (
@@ -665,32 +747,49 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
       <div className="p-3 rounded mb-4" style={{ background: HILITE_BG, border: `1px solid ${LINE}` }}>
         <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: MUTED, marginBottom: 10 }}>Estado de pago</p>
         <div className="flex gap-4 mb-3 flex-wrap">
-          {[["pagado", "Pagado"], ["pendiente", "Pendiente"], ["parcial", "Pago parcial (seña)"], ["cp", "CP (contado pendiente)"]].map(([v, l]) => (
+          {ESTADOS_PAGO.map(([v, l]) => (
             <label key={v} className="flex items-center gap-1.5">
               <input type="radio" checked={ev.estadoPago === v} onChange={() => set("estadoPago", v)} />
               <span style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK }}>{l}</span>
             </label>
           ))}
         </div>
-        <div className="grid grid-cols-3 gap-x-4">
-          <Field label="Precio por persona (opcional)"><input type="number" style={inputStyle} value={ev.precioPorPersona || ""} onChange={e => set("precioPorPersona", e.target.value)} placeholder="$ ..." /></Field>
-          <Field label={ev.estadoPago === "parcial" ? "Monto total del evento (con IVA)" : "Monto (con IVA)"}><input style={inputStyle} value={ev.monto} onChange={e => set("monto", e.target.value)} placeholder="$ ..." /></Field>
-          <Field label="N° de comprobante"><input style={inputStyle} value={ev.comprobanteTexto} onChange={e => set("comprobanteTexto", e.target.value)} placeholder="Factura N°..." /></Field>
+
+        <div className="grid grid-cols-2 gap-x-4">
+          <Field label="Precio por persona (neto, sin IVA)"><input type="number" style={inputStyle} value={ev.precioPorPersona || ""} onChange={e => set("precioPorPersona", e.target.value)} placeholder="$ ..." /></Field>
+          <Field label="Valor de salón aplicado"><input type="number" style={{ ...inputStyle, opacity: 0.8 }} value={valorSalonAplicar} disabled /></Field>
         </div>
-        <div className="grid grid-cols-3 gap-x-4">
-          <Field label="Link a comprobante"><input style={inputStyle} value={ev.comprobanteLink} onChange={e => set("comprobanteLink", e.target.value)} placeholder="Link a Drive/Dropbox" /></Field>
-        </div>
-        {(ev.precioPorPersona || ev.monto) && (() => {
+
+        {(() => {
           const sumaItems = (ev.itemsPresupuesto || []).reduce((s, i) => s + Number(i.cantidad) * Number(i.valorUnitario), 0);
-          const totalConIva = sumaItems || (ev.precioPorPersona && ev.personas ? Number(ev.precioPorPersona) * Number(ev.personas) : Number(ev.monto) || 0);
-          const sinIva = totalConIva / 1.21;
-          const iva = totalConIva - sinIva;
+          const personas = Number(ev.personas) || 0;
+          const precioPersonaNeto = Number(ev.precioPorPersona) || 0;
+          const totalNeto = sumaItems || (personas * precioPersonaNeto + valorSalonAplicar);
+          const totalConIva = totalNeto * 1.21;
+          const precioPersonaConIva = precioPersonaNeto * 1.21;
           return (
-            <p style={{ fontFamily: FONT_MONO, fontSize: 12.5, color: MUTED, marginTop: -6, marginBottom: 10 }}>
-              Total c/IVA $ {totalConIva.toFixed(2)} · Sin IVA $ {sinIva.toFixed(2)} · IVA 21% $ {iva.toFixed(2)}
-            </p>
+            <div className="p-2.5 rounded mb-3" style={{ background: CARD, border: `1px solid ${LINE}` }}>
+              <p style={{ fontFamily: FONT_MONO, fontSize: 12.5, color: INK, marginBottom: 2 }}>Valor por persona (neto): $ {precioPersonaNeto.toFixed(2)}</p>
+              <p style={{ fontFamily: FONT_MONO, fontSize: 12.5, color: INK, marginBottom: 2 }}>Valor por persona + IVA: $ {precioPersonaConIva.toFixed(2)}</p>
+              <p style={{ fontFamily: FONT_MONO, fontSize: 14, color: ACCENT, fontWeight: 700 }}>Total del evento (con IVA): $ {totalConIva.toFixed(2)}</p>
+              <p style={{ fontFamily: FONT_BODY, fontSize: 11, color: MUTED, marginTop: 4 }}>Calculado como (personas × precio por persona) + valor de salón, más IVA 21%. Si cargaste ítems de presupuesto, se usa la suma de esos ítems en su lugar.</p>
+            </div>
           );
         })()}
+
+        <div className="grid grid-cols-3 gap-x-4">
+          <Field label="Monto (con IVA, editable si preferís cargarlo manual)"><input style={inputStyle} value={ev.monto} onChange={e => set("monto", e.target.value)} placeholder="$ ..." /></Field>
+          <Field label="Número de factura"><input style={inputStyle} value={ev.comprobanteTexto} onChange={e => set("comprobanteTexto", e.target.value)} placeholder="Factura N°..." /></Field>
+          <Field label="Retenciones">
+            <select style={inputStyle} value={ev.retenciones || "no"} onChange={e => set("retenciones", e.target.value)}>
+              <option value="no">No</option>
+              <option value="si">Sí</option>
+            </select>
+          </Field>
+        </div>
+        <div className="grid grid-cols-1 gap-x-4">
+          <Field label="Link de comprobante de transferencia o pago"><input style={inputStyle} value={ev.comprobanteLink} onChange={e => set("comprobanteLink", e.target.value)} placeholder="Link a Drive/Dropbox" /></Field>
+        </div>
 
         {ev.estadoPago === "parcial" && (
           <div className="mt-3 p-3 rounded" style={{ background: PARCIAL_BG, border: `1px solid ${PARCIAL}` }}>
@@ -706,37 +805,49 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
             </p>
           </div>
         )}
+      </div>
 
-        {ev.estadoPago === "cp" && (
-          <div className="mt-3 p-3 rounded" style={{ background: CP_BG, border: `1px solid ${CP_COLOR}` }}>
-            <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: CP_COLOR, marginBottom: 10, fontWeight: 600 }}>Datos del vale (para que coincida con la factura previa al evento)</p>
+      <div className="p-3 rounded mb-4" style={{ background: CP_BG, border: `1px solid ${CP_COLOR}` }}>
+        <label className="flex items-center gap-1.5 mb-2">
+          <input type="checkbox" checked={!!ev.generarVale} onChange={e => set("generarVale", e.target.checked)} />
+          <span style={{ fontFamily: FONT_BODY, fontSize: 13, color: CP_COLOR, fontWeight: 600 }}>Generar vale (control administrativo de cubiertos y/o salón sin cobro)</span>
+        </label>
+        <p style={{ fontFamily: FONT_BODY, fontSize: 11.5, color: MUTED, marginBottom: 10 }}>
+          El vale es para Administración: registra cubiertos y salones que se dieron sin cobrar (cortesías, descuentos internos), para contabilizarlos aparte de la factura. No reemplaza a la comanda de cocina.
+        </p>
+        {ev.generarVale && (
+          <>
             <div className="grid grid-cols-2 gap-x-4">
               <Field label="N° de vale (automático)">
                 <input style={{ ...inputStyle, opacity: 0.75 }} value={ev.vale.numero || "Se asigna al guardar"} disabled />
               </Field>
-              <Field label="Tipo de vale">
-                <select style={inputStyle} value={ev.vale.tipo} onChange={e => setVale("tipo", e.target.value)}>
-                  {VALE_TIPOS.map(t => <option key={t} value={t}>{t}</option>)}
+              <Field label="Motivo">
+                <select style={inputStyle} value={ev.vale.motivo || "Cortesía"} onChange={e => setVale("motivo", e.target.value)}>
+                  {VALE_MOTIVOS.map(t => <option key={t} value={t}>{t}</option>)}
                 </select>
               </Field>
-              <Field label="Cantidad"><input type="number" style={inputStyle} value={ev.vale.cantidad} onChange={e => setVale("cantidad", e.target.value)} placeholder="Ej: 10" /></Field>
-              <Field label="Precio unitario"><input type="number" style={inputStyle} value={ev.vale.precioUnitario} onChange={e => setVale("precioUnitario", e.target.value)} placeholder="Ej: 10000" /></Field>
+              <Field label="Cantidad de cubiertos sin cobro"><input type="number" style={inputStyle} value={ev.vale.cantidad} onChange={e => setVale("cantidad", e.target.value)} placeholder="Ej: 10" /></Field>
+              <Field label="Valor unitario de referencia"><input type="number" style={inputStyle} value={ev.vale.precioUnitario} onChange={e => setVale("precioUnitario", e.target.value)} placeholder="Ej: 10000" /></Field>
             </div>
+            <label className="flex items-center gap-1.5 mb-2">
+              <input type="checkbox" checked={!!ev.vale.salonPerdido} onChange={e => setVale("salonPerdido", e.target.checked)} />
+              <span style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK }}>El salón se cedió sin cobro (salón perdido)</span>
+            </label>
             <Field label="Concepto adicional (opcional)"><input style={inputStyle} value={ev.vale.concepto} onChange={e => setVale("concepto", e.target.value)} placeholder="Aclaración extra para el vale" /></Field>
             {ev.vale.cantidad && ev.vale.precioUnitario && (
               <p style={{ fontFamily: FONT_MONO, fontSize: 13, color: CP_COLOR }}>
-                Equivale a {ev.vale.cantidad} {ev.vale.tipo.toLowerCase()} de $ {ev.vale.precioUnitario} c/u — Total $ {Number(ev.vale.cantidad) * Number(ev.vale.precioUnitario)}
+                Equivale a {ev.vale.cantidad} cubiertos de $ {ev.vale.precioUnitario} c/u — Total $ {Number(ev.vale.cantidad) * Number(ev.vale.precioUnitario)}
               </p>
             )}
-          </div>
+          </>
         )}
       </div>
 
       <div className="p-3 rounded mb-4" style={{ background: HILITE_BG, border: `1px solid ${LINE}` }}>
-        <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: MUTED, marginBottom: 10 }}>Comanda (para estadística mensual de cubiertos)</p>
+        <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: MUTED, marginBottom: 10 }}>Comanda para cocina (datos que necesita el sector de cocina)</p>
         <div className="grid grid-cols-2 gap-x-4">
-          <Field label="Cantidad de cubiertos vendidos"><input type="number" style={inputStyle} value={ev.comanda.cubiertos} onChange={e => setComanda("cubiertos", e.target.value)} placeholder="Ej: 80" /></Field>
-          <Field label="Detalle"><input style={inputStyle} value={ev.comanda.detalle} onChange={e => setComanda("detalle", e.target.value)} placeholder="Ej: 80 almuerzos + 20 coffee break" /></Field>
+          <Field label="Cantidad de cubiertos a preparar"><input type="number" style={inputStyle} value={ev.comanda.cubiertos} onChange={e => setComanda("cubiertos", e.target.value)} placeholder="Ej: 80" /></Field>
+          <Field label="Detalle para cocina"><input style={inputStyle} value={ev.comanda.detalle} onChange={e => setComanda("detalle", e.target.value)} placeholder="Ej: 80 almuerzos + 20 coffee break, alergias, horarios de servicio" /></Field>
         </div>
       </div>
 
@@ -751,8 +862,13 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
           ))}
           {!cronoOrdenado.length && <p style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: MUTED }}>Sin ítems todavía. Ej: 18:00 prueba de sonido, 20:30 llegada de invitados, 21:30 coffee break, 22:00 charla, 23:00 finger food, 23:40 postre.</p>}
         </div>
-        <div className="flex gap-2">
-          <input type="time" lang="es-AR" style={{ ...inputStyle, maxWidth: 110 }} value={nuevaHora} onChange={e => setNuevaHora(e.target.value)} />
+        <div className="flex gap-2 items-start">
+          <div style={{ maxWidth: 150 }}>
+            <select style={inputStyle} value={FRANJAS_HORARIAS.includes(nuevaHora) ? nuevaHora : ""} onChange={e => setNuevaHora(e.target.value)}>
+              <option value="">Hora…</option>
+              {FRANJAS_HORARIAS.map(h => <option key={h} value={h}>{h}</option>)}
+            </select>
+          </div>
           <input style={inputStyle} value={nuevoDetalle} onChange={e => setNuevoDetalle(e.target.value)} placeholder="Qué pasa a esa hora..." />
           <button type="button" onClick={agregarCronograma} className="px-3 rounded text-sm" style={{ background: INK_SOFT, color: PAPER }}>+</button>
         </div>
@@ -795,9 +911,15 @@ function EventDetail({ ev, jefeAreas, isAdmin, onEdit, onVaucher, onCronograma, 
       <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}>
         <b>Organiza:</b> {ev.empresaOrganiza || "-"} · <b>Contrata:</b> {ev.empresaContrata || "-"} · <b>Paga:</b> {ev.empresaPaga || "-"}
       </p>
+      {(ev.contactoNombre || ev.contactoVia) && (
+        <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}>
+          <b>Contacto:</b> {ev.contactoNombre || "-"} {ev.contactoVia ? `· ${ev.contactoVia}` : ""}
+        </p>
+      )}
+      {ev.esHuesped && <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}><b>Hospedaje:</b> Es huésped del hotel</p>}
       {(ev.monto || ev.comprobanteTexto || ev.comprobanteLink) && (
         <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}>
-          <b>Pago:</b> {ev.monto ? `${ev.monto} · ` : ""}{ev.comprobanteTexto || ""} {ev.comprobanteLink && <a href={ev.comprobanteLink} target="_blank" rel="noreferrer" style={{ color: ACCENT, textDecoration: "underline" }}>Ver comprobante</a>}
+          <b>Pago:</b> {ev.monto ? `${ev.monto} · ` : ""}{ev.comprobanteTexto ? `Factura ${ev.comprobanteTexto} · ` : ""}Retenciones: {ev.retenciones === "si" ? "Sí" : "No"} {ev.comprobanteLink && <a href={ev.comprobanteLink} target="_blank" rel="noreferrer" style={{ color: ACCENT, textDecoration: "underline" }}>Ver comprobante</a>}
         </p>
       )}
       {ev.estadoPago === "parcial" && (
@@ -814,7 +936,7 @@ function EventDetail({ ev, jefeAreas, isAdmin, onEdit, onVaucher, onCronograma, 
         <button onClick={onVaucher} className="px-3 py-1.5 rounded text-xs font-medium" style={{ background: ACCENT, color: "#fff", fontFamily: FONT_BODY }}>Ver / imprimir vaucher</button>
         <button onClick={onCronograma} className="px-3 py-1.5 rounded text-xs font-medium" style={{ background: PAGADO, color: PAPER, fontFamily: FONT_BODY }}>Ver cronograma</button>
         <button onClick={onComanda} className="px-3 py-1.5 rounded text-xs font-medium" style={{ border: `1px solid ${PAGADO}`, color: PAGADO, fontFamily: FONT_BODY }}>Ver / imprimir comanda</button>
-        {ev.estadoPago === "cp" && <button onClick={onVale} className="px-3 py-1.5 rounded text-xs font-medium" style={{ background: CP_COLOR, color: "#fff", fontFamily: FONT_BODY }}>Ver / imprimir vale</button>}
+        {ev.generarVale && <button onClick={onVale} className="px-3 py-1.5 rounded text-xs font-medium" style={{ background: CP_COLOR, color: "#fff", fontFamily: FONT_BODY }}>Ver / imprimir vale</button>}
         <button onClick={onPlano} className="px-3 py-1.5 rounded text-xs font-medium" style={{ border: `1px solid ${ACCENT}`, color: ACCENT, fontFamily: FONT_BODY }}>
           {ev.planoDibujo ? "Ver / editar plano del evento" : tienePlantilla ? "Dibujar plano del evento" : "Plano no cargado"}
         </button>
@@ -841,12 +963,13 @@ function Voucher({ ev, onBack }) {
   const personas = Number(ev.personas) || 0;
   const items = ev.itemsPresupuesto || [];
   const sumaItems = items.reduce((s, i) => s + Number(i.cantidad) * Number(i.valorUnitario), 0);
-  const totalConIva = sumaItems || (ev.precioPorPersona && personas
-    ? Number(ev.precioPorPersona) * personas
-    : Number(ev.monto) || 0);
+  const valorSalon = Number(ev.valorSalon) || 0;
+  const precioPersonaNeto = Number(ev.precioPorPersona) || 0;
+  const totalNeto = sumaItems || (personas * precioPersonaNeto + valorSalon) || (Number(ev.monto) || 0) / 1.21;
+  const totalConIva = ev.monto && !sumaItems && !(personas && precioPersonaNeto) ? Number(ev.monto) : totalNeto * 1.21;
   const sinIva = totalConIva / 1.21;
   const iva = totalConIva - sinIva;
-  const pagado = ev.estadoPago === "pagado" ? totalConIva : (Number(ev.adelanto) || 0);
+  const pagado = (ev.estadoPago === "pagado" || ev.estadoPago === "total") ? totalConIva : (Number(ev.adelanto) || 0);
   const saldo = totalConIva - pagado;
 
   return (
@@ -872,6 +995,8 @@ function Voucher({ ev, onBack }) {
           <p><b>Organiza:</b> {ev.empresaOrganiza || "-"}</p>
           <p><b>Contrata:</b> {ev.empresaContrata || "-"}</p>
           <p><b>Paga:</b> {ev.empresaPaga || "-"}</p>
+          {(ev.contactoNombre || ev.contactoVia) && <p><b>Contacto:</b> {ev.contactoNombre || "-"} {ev.contactoVia ? `· ${ev.contactoVia}` : ""}</p>}
+          {ev.esHuesped && <p><b>Hospedaje:</b> Huésped del hotel</p>}
         </div>
 
         {items.length > 0 && (
@@ -908,17 +1033,20 @@ function Voucher({ ev, onBack }) {
           <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: PARCIAL, marginBottom: 8, fontWeight: 600 }}>Detalle de facturación</p>
           {!items.length && <>
             <p><b>Ítems de comida:</b> {ev.incluye?.length ? ev.incluye.join(", ") : "-"}</p>
-            <p><b>Precio por persona:</b> {ev.precioPorPersona ? `$ ${ev.precioPorPersona}` : "-"}</p>
+            <p><b>Valor por persona (neto):</b> {ev.precioPorPersona ? `$ ${Number(ev.precioPorPersona).toFixed(2)}` : "-"}</p>
+            <p><b>Valor por persona + IVA:</b> {ev.precioPorPersona ? `$ ${(Number(ev.precioPorPersona) * 1.21).toFixed(2)}` : "-"}</p>
             <p><b>Cantidad de personas:</b> {ev.personas || "-"}</p>
+            <p><b>Valor de salón aplicado:</b> $ {valorSalon.toFixed(2)}</p>
             <div style={{ height: 1, background: PARCIAL, opacity: 0.3, margin: "8px 0" }} />
           </>}
           <p><b>Valor sin IVA:</b> $ {sinIva.toFixed(2)}</p>
           <p><b>IVA (21%):</b> $ {iva.toFixed(2)}</p>
-          <p style={{ fontWeight: 700 }}><b>Precio total (con IVA):</b> $ {totalConIva.toFixed(2)}</p>
+          <p style={{ fontWeight: 700 }}><b>Total del evento (con IVA):</b> $ {totalConIva.toFixed(2)}</p>
           <div style={{ height: 1, background: PARCIAL, opacity: 0.3, margin: "8px 0" }} />
           <p><b>Pagado:</b> $ {pagado.toFixed(2)}</p>
           <p><b>Saldo pendiente:</b> $ {saldo.toFixed(2)}</p>
-          {ev.comprobanteTexto && <p><b>Comprobante:</b> {ev.comprobanteTexto}</p>}
+          {ev.comprobanteTexto && <p><b>N° de factura:</b> {ev.comprobanteTexto}</p>}
+          <p><b>Retenciones:</b> {ev.retenciones === "si" ? "Sí" : "No"}</p>
         </div>
 
         {ev.notas && <p style={{ fontFamily: FONT_BODY, fontSize: 13.5, color: INK }}><b>Notas:</b> {ev.notas}</p>}
@@ -941,12 +1069,13 @@ function Vale({ ev, onBack }) {
         <button onClick={onBack} className="px-4 py-2 rounded text-sm font-medium" style={{ border: `1px solid ${LINE}`, color: INK, fontFamily: FONT_BODY }}>Volver</button>
       </div>
       <div className="p-8" style={{ background: CARD, border: `1px solid ${INK}`, maxWidth: 640, margin: "0 auto" }}>
-        <PrintHeader eyebrow="Vale de restaurant / confitería" titulo={v.tipo || "Vale"} />
+        <PrintHeader eyebrow="Vale interno · Control administrativo" titulo="Cubiertos / Salón sin cobro" />
         <div className="p-4 mb-4 rounded" style={{ background: CP_BG, border: `1px solid ${CP_COLOR}` }}>
           <p style={{ fontFamily: FONT_HEAD, fontSize: 18, color: CP_COLOR, marginBottom: 8 }}>
-            Este vale equivale a {v.cantidad || "-"} {(v.tipo || "").toLowerCase()} de $ {v.precioUnitario || "-"} c/u
+            {v.motivo || "Cortesía"}: {v.cantidad || "-"} cubiertos de $ {v.precioUnitario || "-"} c/u
           </p>
-          <p style={{ fontFamily: FONT_MONO, fontSize: 16, color: CP_COLOR, fontWeight: 600 }}>Total: $ {total || "-"}</p>
+          <p style={{ fontFamily: FONT_MONO, fontSize: 16, color: CP_COLOR, fontWeight: 600 }}>Total sin cobro: $ {total || "-"}</p>
+          {v.salonPerdido && <p style={{ fontFamily: FONT_BODY, fontSize: 13.5, color: CP_COLOR, fontWeight: 600, marginTop: 6 }}>Salón cedido sin cobro</p>}
         </div>
         <div className="grid grid-cols-2 gap-y-2 gap-x-6 mb-4" style={{ fontFamily: FONT_BODY, fontSize: 13.5, color: INK }}>
           <p><b>N° de vale:</b> {v.numero || "-"}</p>
@@ -960,7 +1089,7 @@ function Vale({ ev, onBack }) {
           <p><b>Paga:</b> {ev.empresaPaga || "-"}</p>
         </div>
         {v.concepto && <p style={{ fontFamily: FONT_BODY, fontSize: 13.5, color: INK, marginBottom: 10 }}><b>Concepto:</b> {v.concepto}</p>}
-        <p style={{ fontFamily: FONT_BODY, fontSize: 12, color: MUTED }}>Este vale debe coincidir con la factura previa al evento (CP — contado pendiente).</p>
+        <p style={{ fontFamily: FONT_BODY, fontSize: 12, color: MUTED }}>Este vale es para uso interno de Administración, para contabilizar cubiertos y salones cedidos sin cobro (no es un comprobante fiscal).</p>
         <p className="mt-8" style={{ fontFamily: FONT_MONO, fontSize: 10.5, color: MUTED }}>Generado el {new Date().toLocaleDateString("es-AR")}</p>
       </div>
     </div>
@@ -1466,8 +1595,9 @@ function Stats({ events }) {
 /* ============================================================
    AJUSTES (solo admin)
    ============================================================ */
-function Settings({ jefeAreas, setJefeAreas, tarifas, setTarifas, floorplans, setFloorplans }) {
+function Settings({ jefeAreas, setJefeAreas, tarifas, setTarifas, floorplans, setFloorplans, events, onImportEvents }) {
   const [nuevoSalon, setNuevoSalon] = useState("");
+  const [tab, setTab] = useState("tarifas");
 
   const subirPlano = (salon, file) => {
     if (!salon.trim() || !file) return;
@@ -1478,65 +1608,94 @@ function Settings({ jefeAreas, setJefeAreas, tarifas, setTarifas, floorplans, se
 
   const setTarifa = (salon, campo, valor) => setTarifas(prev => ({ ...prev, [salon]: { ...(prev[salon] || {}), [campo]: valor } }));
 
+  const TABS = [
+    ["tarifas", "Tarifas"],
+    ["planos", "Planos"],
+    ["comanda", "Comanda / Texto para enviar"],
+    ["importar", "Importar"],
+  ];
+
   return (
-    <div className="flex flex-col gap-6">
-      <div className="p-5 rounded" style={{ background: CARD, border: `1px solid ${LINE}` }}>
-        <h3 style={{ fontFamily: FONT_HEAD, fontSize: 20, color: INK, marginBottom: 12 }}>Jefe de Áreas</h3>
-        <p style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: MUTED, marginBottom: 16 }}>
-          Un solo contacto de WhatsApp. Vos recibís el mensaje con el detalle del evento y lo reenviás a los grupos de cada sector.
-        </p>
-        <Field label="Número de WhatsApp de Jefe de Áreas (opcional, con código de país)">
-          <input style={inputStyle} value={jefeAreas.telefono} onChange={e => setJefeAreas({ ...jefeAreas, telefono: e.target.value })} placeholder="Ej: 5491122334455" />
-        </Field>
+    <div className="flex flex-col gap-4">
+      <div className="flex gap-4 flex-wrap" style={{ borderBottom: `1px solid ${LINE}` }}>
+        {TABS.map(([key, label]) => (
+          <button key={key} onClick={() => setTab(key)} className="text-sm font-medium pb-2"
+            style={{ fontFamily: FONT_BODY, color: tab === key ? INK : MUTED, borderBottom: tab === key ? `2px solid ${ACCENT}` : "2px solid transparent" }}>
+            {label}
+          </button>
+        ))}
       </div>
 
-      <div className="p-5 rounded" style={{ background: CARD, border: `1px solid ${LINE}` }}>
-        <h3 style={{ fontFamily: FONT_HEAD, fontSize: 20, color: INK, marginBottom: 12 }}>Tarifas de salones (mes actual)</h3>
-        <p style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: MUTED, marginBottom: 16 }}>
-          Actualizá acá los valores de tarifa completa y media tarifa de cada salón. Al armar una ficha, el valor se muestra automáticamente.
-        </p>
-        <div className="flex flex-col gap-3">
-          {SALONES_FIJOS.map(s => (
-            <div key={s} className="grid grid-cols-3 gap-3 items-center">
-              <span style={{ fontFamily: FONT_BODY, fontSize: 13.5, color: INK, fontWeight: 600 }}>{s}</span>
-              <input style={inputStyle} value={tarifas[s]?.completa || ""} onChange={e => setTarifa(s, "completa", e.target.value)} placeholder="Tarifa completa $" />
-              <input style={inputStyle} value={tarifas[s]?.media || ""} onChange={e => setTarifa(s, "media", e.target.value)} placeholder="Media tarifa $" />
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className="p-5 rounded" style={{ background: CARD, border: `1px solid ${LINE}` }}>
-        <h3 style={{ fontFamily: FONT_HEAD, fontSize: 20, color: INK, marginBottom: 12 }}>Planos de salones (plantilla vacía)</h3>
-        <p style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: MUTED, marginBottom: 16 }}>Subí acá el plano vacío (plantilla) de cada salón, sin marcar nada. Después, desde cada evento vas a poder abrir ese plano y dibujar/anotar a mano la disposición específica de ese evento, sin modificar esta plantilla (el nombre del salón debe coincidir con el que elegís en "Salón").</p>
-
-        <div className="flex flex-col gap-3 mb-4">
-          {Object.entries(floorplans).map(([salon, img]) => (
-            <div key={salon} className="flex items-center gap-3 p-2 rounded" style={{ background: HILITE_BG }}>
-              <img src={img} alt={salon} style={{ width: 56, height: 56, objectFit: "cover", borderRadius: 4, border: `1px solid ${LINE}` }} />
-              <span style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK, flex: 1 }}>{salon}</span>
-              <button onClick={() => setFloorplans(prev => { const n = { ...prev }; delete n[salon]; return n; })} style={{ color: PENDIENTE, fontSize: 12, fontFamily: FONT_BODY }}>Eliminar</button>
-            </div>
-          ))}
-        </div>
-
-        <div className="flex gap-2 items-start">
-          <select style={{ ...inputStyle, maxWidth: 220 }} value={nuevoSalon} onChange={e => setNuevoSalon(e.target.value)}>
-            <option value="">Elegir salón…</option>
-            {SALONES_FIJOS.map(s => <option key={s} value={s}>{s}</option>)}
-          </select>
-          <div style={{ flex: 1, maxWidth: 320 }}>
-            <DropZone
-              inputId="input-plano"
-              accept="image/*"
-              label="Elegir imagen del plano"
-              hint={nuevoSalon ? "Arrastrá la imagen acá o tocá el botón" : "Elegí un salón primero"}
-              disabled={!nuevoSalon}
-              onFile={file => subirPlano(nuevoSalon, file)}
-            />
+      {tab === "tarifas" && (
+        <div className="p-5 rounded" style={{ background: CARD, border: `1px solid ${LINE}` }}>
+          <h3 style={{ fontFamily: FONT_HEAD, fontSize: 20, color: INK, marginBottom: 12 }}>Tarifas de salones (mes actual)</h3>
+          <p style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: MUTED, marginBottom: 16 }}>
+            Actualizá acá los valores de tarifa completa y media tarifa de cada salón. Al armar una ficha, el valor se muestra automáticamente. Los eventos ya guardados no se ven afectados por cambios posteriores acá (queda el valor histórico aplicado al momento de la venta). Para un caso puntual, usá "Tarifa especial" dentro de la ficha del evento.
+          </p>
+          <div className="flex flex-col gap-3">
+            {SALONES_FIJOS.map(s => (
+              <div key={s} className="grid grid-cols-3 gap-3 items-center">
+                <span style={{ fontFamily: FONT_BODY, fontSize: 13.5, color: INK, fontWeight: 600 }}>{s}</span>
+                <input style={inputStyle} value={tarifas[s]?.completa || ""} onChange={e => setTarifa(s, "completa", e.target.value)} placeholder="Tarifa completa $" />
+                <input style={inputStyle} value={tarifas[s]?.media || ""} onChange={e => setTarifa(s, "media", e.target.value)} placeholder="Media tarifa $" />
+              </div>
+            ))}
           </div>
         </div>
-      </div>
+      )}
+
+      {tab === "planos" && (
+        <div className="p-5 rounded" style={{ background: CARD, border: `1px solid ${LINE}` }}>
+          <h3 style={{ fontFamily: FONT_HEAD, fontSize: 20, color: INK, marginBottom: 12 }}>Planos de salones (plantilla vacía)</h3>
+          <p style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: MUTED, marginBottom: 16 }}>Subí acá el plano vacío (plantilla) de cada salón, sin marcar nada. Después, desde cada evento vas a poder abrir ese plano y dibujar/anotar a mano la disposición específica de ese evento, sin modificar esta plantilla (el nombre del salón debe coincidir con el que elegís en "Salón").</p>
+
+          <div className="flex flex-col gap-3 mb-4">
+            {Object.entries(floorplans).map(([salon, img]) => (
+              <div key={salon} className="flex items-center gap-3 p-2 rounded" style={{ background: HILITE_BG }}>
+                <img src={img} alt={salon} style={{ width: 56, height: 56, objectFit: "cover", borderRadius: 4, border: `1px solid ${LINE}` }} />
+                <span style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK, flex: 1 }}>{salon}</span>
+                <button onClick={() => setFloorplans(prev => { const n = { ...prev }; delete n[salon]; return n; })} style={{ color: PENDIENTE, fontSize: 12, fontFamily: FONT_BODY }}>Eliminar</button>
+              </div>
+            ))}
+          </div>
+
+          <div className="flex gap-2 items-start">
+            <select style={{ ...inputStyle, maxWidth: 220 }} value={nuevoSalon} onChange={e => setNuevoSalon(e.target.value)}>
+              <option value="">Elegir salón…</option>
+              {SALONES_FIJOS.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+            <div style={{ flex: 1, maxWidth: 320 }}>
+              <DropZone
+                inputId="input-plano"
+                accept="image/*"
+                label="Elegir imagen del plano"
+                hint={nuevoSalon ? "Arrastrá la imagen acá o tocá el botón" : "Elegí un salón primero"}
+                disabled={!nuevoSalon}
+                onFile={file => subirPlano(nuevoSalon, file)}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {tab === "comanda" && (
+        <div className="p-5 rounded" style={{ background: CARD, border: `1px solid ${LINE}` }}>
+          <h3 style={{ fontFamily: FONT_HEAD, fontSize: 20, color: INK, marginBottom: 12 }}>Jefe de Áreas · texto para enviar</h3>
+          <p style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: MUTED, marginBottom: 16 }}>
+            Un solo contacto de WhatsApp. Vos recibís el mensaje con el detalle del evento (incluye datos para comanda de cocina) y lo reenviás a los grupos de cada sector.
+          </p>
+          <Field label="Número de WhatsApp de Jefe de Áreas (opcional, con código de país)">
+            <input style={inputStyle} value={jefeAreas.telefono} onChange={e => setJefeAreas({ ...jefeAreas, telefono: e.target.value })} placeholder="Ej: 5491122334455" />
+          </Field>
+          <p style={{ fontFamily: FONT_BODY, fontSize: 11.5, color: MUTED, marginTop: 8 }}>
+            Recordá: la <b>Comanda</b> es lo que necesita Cocina (cubiertos, detalle del servicio). El <b>Vale</b> es lo que necesita Administración (cubiertos y/o salón cedido sin cobro, para contabilizarlo aparte de la factura). Ambos se cargan y se imprimen desde la ficha de cada evento.
+          </p>
+        </div>
+      )}
+
+      {tab === "importar" && (
+        <ImportICS onImport={(nuevos) => onImportEvents(nuevos)} />
+      )}
     </div>
   );
 }
@@ -1586,7 +1745,7 @@ export default function App() {
 
   const handleSaveEvent = (ev) => {
     let toSave = ev;
-    if (ev.estadoPago === "cp" && !ev.vale?.numero) {
+    if (ev.generarVale && !ev.vale?.numero) {
       const numero = proximoVale;
       const siguiente = proximoVale + 1;
       setProximoVale(siguiente);
@@ -1642,7 +1801,7 @@ export default function App() {
       </header>
 
       <nav className="no-print px-5 py-3 flex gap-4 flex-wrap" style={{ background: CARD, borderBottom: `1px solid ${LINE}` }}>
-        {[["calendario", "Mes"], ["semana", "Semana"], ...(isAdmin ? [["importar", "Importar"], ["estadisticas", "Estadísticas"], ["ajustes", "Ajustes"]] : [])].map(([key, label]) => (
+        {[["calendario", "Mes"], ...(isAdmin ? [["semana", "Semana"], ["estadisticas", "Estadísticas"], ["ajustes", "Ajustes"]] : [])].map(([key, label]) => (
           <button key={key} onClick={() => setView(key)} className="text-sm font-medium pb-1"
             style={{ fontFamily: FONT_BODY, color: view === key ? INK : MUTED, borderBottom: view === key ? `2px solid ${ACCENT}` : "2px solid transparent" }}>
             {label}
@@ -1658,13 +1817,14 @@ export default function App() {
             onDayClick={(iso) => {
               const evsDia = events.filter(e => e.fecha === iso);
               if (evsDia.length === 1) { setSelectedEvent(evsDia[0]); setView("ficha"); }
-              else if (evsDia.length > 1) { setWeekStart(mondayOf(fromISO(iso))); setView("semana"); }
+              else if (evsDia.length > 1 && isAdmin) { setWeekStart(mondayOf(fromISO(iso))); setView("semana"); }
+              else if (evsDia.length > 1) { setSelectedEvent(evsDia[0]); setView("ficha"); }
               else if (isAdmin) { setNewEventDate(iso); setEditingEvent(null); setView("nuevo"); }
             }}
           />
         )}
 
-        {view === "semana" && (
+        {view === "semana" && isAdmin && (
           <WeekView weekStart={weekStart} setWeekStart={setWeekStart} events={events} isAdmin={isAdmin}
             onOpenEvent={(e) => { setSelectedEvent(e); setView("ficha"); }}
             onNewEvent={(iso) => { setNewEventDate(iso); setEditingEvent(null); setView("nuevo"); }}
@@ -1698,10 +1858,6 @@ export default function App() {
           />
         )}
 
-        {view === "importar" && isAdmin && (
-          <ImportICS onImport={(nuevos) => setEvents(prev => [...prev, ...nuevos])} />
-        )}
-
         {view === "estadisticas" && isAdmin && <Stats events={events} />}
 
         {view === "nuevo" && isAdmin && (
@@ -1714,7 +1870,14 @@ export default function App() {
           />
         )}
 
-        {view === "ajustes" && isAdmin && <Settings jefeAreas={jefeAreas} setJefeAreas={setJefeAreas} tarifas={tarifas} setTarifas={setTarifas} floorplans={floorplans} setFloorplans={setFloorplans} />}
+        {view === "ajustes" && isAdmin && (
+          <Settings
+            jefeAreas={jefeAreas} setJefeAreas={setJefeAreas}
+            tarifas={tarifas} setTarifas={setTarifas}
+            floorplans={floorplans} setFloorplans={setFloorplans}
+            events={events} onImportEvents={(nuevos) => setEvents(prev => [...prev, ...nuevos])}
+          />
+        )}
       </main>
     </div>
   );

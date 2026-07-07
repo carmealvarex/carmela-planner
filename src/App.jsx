@@ -497,22 +497,13 @@ function WeekView({ weekStart, setWeekStart, events, isAdmin, onOpenEvent, onNew
 
       <div className="flex flex-col gap-2">
         {enSemana.map(e => (
-          isAdmin ? (
-            <button key={e.id} onClick={() => onOpenEvent(e)} className="text-left p-3 rounded flex items-center justify-between" style={{ background: CARD, border: `1px solid ${LINE}` }}>
-              <div>
-                <div style={{ fontFamily: FONT_BODY, fontWeight: 600, color: INK, fontSize: 14 }}>{fmtFecha(e.fecha)} — {e.salon || "Sin salón"}</div>
-                <div style={{ fontFamily: FONT_BODY, fontSize: 12, color: MUTED }}>{e.horaInicio}–{e.horaFin} · {e.personas || "?"} personas</div>
-              </div>
-              <Stamp estadoPago={e.estadoPago} />
-            </button>
-          ) : (
-            <div key={e.id} className="p-3 rounded flex items-center justify-between" style={{ background: CARD, border: `1px solid ${LINE}` }}>
-              <div>
-                <div style={{ fontFamily: FONT_BODY, fontWeight: 600, color: INK, fontSize: 14 }}>{fmtFecha(e.fecha)} — {e.salon || "Sin salón"}</div>
-                <div style={{ fontFamily: FONT_BODY, fontSize: 12, color: MUTED }}>{e.horaInicio}–{e.horaFin} · {e.personas || "?"} personas</div>
-              </div>
+          <button key={e.id} onClick={() => onOpenEvent(e)} className="text-left p-3 rounded flex items-center justify-between" style={{ background: CARD, border: `1px solid ${LINE}` }}>
+            <div>
+              <div style={{ fontFamily: FONT_BODY, fontWeight: 600, color: INK, fontSize: 14 }}>{fmtFecha(e.fecha)} — {e.salon || "Sin salón"}</div>
+              <div style={{ fontFamily: FONT_BODY, fontSize: 12, color: MUTED }}>{e.horaInicio}–{e.horaFin} · {e.personas || "?"} personas</div>
             </div>
-          )
+            <Stamp estadoPago={e.estadoPago} />
+          </button>
         ))}
         {!enSemana.length && <p style={{ fontFamily: FONT_BODY, fontSize: 13, color: MUTED }}>Sin eventos cargados esta semana.</p>}
         {isAdmin && (
@@ -1959,7 +1950,7 @@ export default function App() {
       <nav className="no-print px-5 py-3 flex gap-4 flex-wrap" style={{ background: CARD, borderBottom: `1px solid ${LINE}` }}>
         {(isAdmin
           ? [["calendario", "Mes"], ["semana", "Semana"], ["estadisticas", "Estadísticas"], ["ajustes", "Ajustes"]]
-          : [["semana", "Semana"]]
+          : [["calendario", "Mes"], ["semana", "Semana"], ["estadisticas", "Estadísticas"]]
         ).map(([key, label]) => (
           <button key={key} onClick={() => setView(key)} className="text-sm font-medium pb-1"
             style={{ fontFamily: FONT_BODY, color: view === key ? INK : MUTED, borderBottom: view === key ? `2px solid ${ACCENT}` : "2px solid transparent" }}>
@@ -1976,8 +1967,7 @@ export default function App() {
             onDayClick={(iso) => {
               const evsDia = events.filter(e => e.fecha === iso);
               if (evsDia.length === 1) { setSelectedEvent(evsDia[0]); setView("ficha"); }
-              else if (evsDia.length > 1 && isAdmin) { setWeekStart(mondayOf(fromISO(iso))); setView("semana"); }
-              else if (evsDia.length > 1) { setSelectedEvent(evsDia[0]); setView("ficha"); }
+              else if (evsDia.length > 1) { setWeekStart(mondayOf(fromISO(iso))); setView("semana"); }
               else if (isAdmin) { setNewEventDate(iso); setEditingEvent(null); setView("nuevo"); }
             }}
           />
@@ -2017,7 +2007,7 @@ export default function App() {
           />
         )}
 
-        {view === "estadisticas" && isAdmin && <Stats events={events} />}
+        {view === "estadisticas" && <Stats events={events} />}
 
         {view === "nuevo" && isAdmin && (
           <EventForm

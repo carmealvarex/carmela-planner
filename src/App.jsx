@@ -20,6 +20,8 @@ const PENDIENTE = "#96453A";
 const PENDIENTE_BG = "#F3DED9";
 const CP_COLOR = "#8C6A1E";
 const CP_BG = "#F3E9D2";
+const PARCIAL = "#4A6FA5";
+const PARCIAL_BG = "#E3EAF3";
 
 const FONT_IMPORT = `@import url('https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,wght@0,400;0,600;0,700;1,500&family=Montserrat:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');`;
 
@@ -89,6 +91,12 @@ function getMonthGrid(year, month) {
 function estadoTexto(ev) {
   if (ev.estadoPago === "pagado") return "Pagado ✅";
   if (ev.estadoPago === "cp") return "CP (contado pendiente) — vale emitido 🧾";
+  if (ev.estadoPago === "parcial") {
+    const total = Number(ev.monto) || 0;
+    const pagado = Number(ev.adelanto) || 0;
+    const falta = total - pagado;
+    return `Pago parcial — seña/adelanto $ ${pagado} de $ ${total} · Falta facturar $ ${falta} 🟡`;
+  }
   return "Pendiente de pago ⏳";
 }
 
@@ -208,7 +216,7 @@ function blankEvent(fecha) {
     tarifaTipo: "completa",
     catering: false, coffeeBreak: false, armadoFuera: false,
     empresaOrganiza: "", empresaContrata: "", empresaPaga: "",
-    estadoPago: "pendiente", monto: "", comprobanteTexto: "", comprobanteLink: "",
+    estadoPago: "pendiente", monto: "", adelanto: "", comprobanteTexto: "", comprobanteLink: "",
     vale: { numero: "", tipo: "Coffee break", cantidad: "", precioUnitario: "", concepto: "" },
     comanda: { cubiertos: "", detalle: "" },
     cronograma: [],
@@ -238,6 +246,7 @@ function Stamp({ estadoPago }) {
   const map = {
     pagado: { color: PAGADO, label: "Pagado" },
     cp: { color: CP_COLOR, label: "CP · Vale" },
+    parcial: { color: PARCIAL, label: "Parcial · Seña" },
     pendiente: { color: PENDIENTE, label: "Pendiente" },
   };
   const s = map[estadoPago] || map.pendiente;
@@ -367,7 +376,7 @@ function MonthView({ year, month, events, onPrev, onNext, onDayClick }) {
                   <div style={{ fontFamily: FONT_MONO, fontSize: 11, color: INK }}>{d.getDate()}</div>
                   <div className="flex flex-col gap-0.5 mt-1">
                     {evs.slice(0, 2).map(e => (
-                      <div key={e.id} className="truncate rounded px-1" style={{ fontSize: 10, background: e.estadoPago === "pagado" ? PAGADO_BG : e.estadoPago === "cp" ? CP_BG : PENDIENTE_BG, color: e.estadoPago === "pagado" ? PAGADO : e.estadoPago === "cp" ? CP_COLOR : PENDIENTE, fontFamily: FONT_BODY }}>
+                      <div key={e.id} className="truncate rounded px-1" style={{ fontSize: 10, background: e.estadoPago === "pagado" ? PAGADO_BG : e.estadoPago === "cp" ? CP_BG : e.estadoPago === "parcial" ? PARCIAL_BG : PENDIENTE_BG, color: e.estadoPago === "pagado" ? PAGADO : e.estadoPago === "cp" ? CP_COLOR : e.estadoPago === "parcial" ? PARCIAL : PENDIENTE, fontFamily: FONT_BODY }}>
                         {e.salon || "Evento"}
                       </div>
                     ))}
@@ -547,8 +556,8 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
 
       <div className="p-3 rounded mb-4" style={{ background: HILITE_BG, border: `1px solid ${LINE}` }}>
         <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: MUTED, marginBottom: 10 }}>Estado de pago</p>
-        <div className="flex gap-4 mb-3">
-          {[["pagado", "Pagado"], ["pendiente", "Pendiente"], ["cp", "CP (contado pendiente)"]].map(([v, l]) => (
+        <div className="flex gap-4 mb-3 flex-wrap">
+          {[["pagado", "Pagado"], ["pendiente", "Pendiente"], ["parcial", "Pago parcial (seña)"], ["cp", "CP (contado pendiente)"]].map(([v, l]) => (
             <label key={v} className="flex items-center gap-1.5">
               <input type="radio" checked={ev.estadoPago === v} onChange={() => set("estadoPago", v)} />
               <span style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK }}>{l}</span>
@@ -556,16 +565,33 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
           ))}
         </div>
         <div className="grid grid-cols-3 gap-x-4">
-          <Field label="Monto"><input style={inputStyle} value={ev.monto} onChange={e => set("monto", e.target.value)} placeholder="$ ..." /></Field>
+          <Field label={ev.estadoPago === "parcial" ? "Monto total del evento" : "Monto"}><input style={inputStyle} value={ev.monto} onChange={e => set("monto", e.target.value)} placeholder="$ ..." /></Field>
           <Field label="N° de comprobante"><input style={inputStyle} value={ev.comprobanteTexto} onChange={e => set("comprobanteTexto", e.target.value)} placeholder="Factura N°..." /></Field>
           <Field label="Link a comprobante"><input style={inputStyle} value={ev.comprobanteLink} onChange={e => set("comprobanteLink", e.target.value)} placeholder="Link a Drive/Dropbox" /></Field>
         </div>
+
+        {ev.estadoPago === "parcial" && (
+          <div className="mt-3 p-3 rounded" style={{ background: PARCIAL_BG, border: `1px solid ${PARCIAL}` }}>
+            <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: PARCIAL, marginBottom: 10, fontWeight: 600 }}>
+              Pago parcial — seña o adelanto (ej: 50% adelantado, o el salón pagado pero falta el catering)
+            </p>
+            <div className="grid grid-cols-2 gap-x-4">
+              <Field label="Monto ya pagado (seña/adelanto)"><input type="number" style={inputStyle} value={ev.adelanto} onChange={e => set("adelanto", e.target.value)} placeholder="Ej: 50000" /></Field>
+              <Field label="Concepto de la seña (opcional)"><input style={inputStyle} value={ev.conceptoAdelanto || ""} onChange={e => set("conceptoAdelanto", e.target.value)} placeholder="Ej: seña salón, falta catering" /></Field>
+            </div>
+            <p style={{ fontFamily: FONT_MONO, fontSize: 14, color: PARCIAL, fontWeight: 600, marginTop: 4 }}>
+              Total $ {Number(ev.monto) || 0} — Pagado $ {Number(ev.adelanto) || 0} — Falta facturar $ {(Number(ev.monto) || 0) - (Number(ev.adelanto) || 0)}
+            </p>
+          </div>
+        )}
 
         {ev.estadoPago === "cp" && (
           <div className="mt-3 p-3 rounded" style={{ background: CP_BG, border: `1px solid ${CP_COLOR}` }}>
             <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: CP_COLOR, marginBottom: 10, fontWeight: 600 }}>Datos del vale (para que coincida con la factura previa al evento)</p>
             <div className="grid grid-cols-2 gap-x-4">
-              <Field label="N° de vale"><input style={inputStyle} value={ev.vale.numero} onChange={e => setVale("numero", e.target.value)} placeholder="Vale N°..." /></Field>
+              <Field label="N° de vale (automático)">
+                <input style={{ ...inputStyle, opacity: 0.75 }} value={ev.vale.numero || "Se asigna al guardar"} disabled />
+              </Field>
               <Field label="Tipo de vale">
                 <select style={inputStyle} value={ev.vale.tipo} onChange={e => setVale("tipo", e.target.value)}>
                   {VALE_TIPOS.map(t => <option key={t} value={t}>{t}</option>)}
@@ -649,6 +675,12 @@ function EventDetail({ ev, jefeAreas, isAdmin, onEdit, onVaucher, onCronograma, 
       {(ev.monto || ev.comprobanteTexto || ev.comprobanteLink) && (
         <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}>
           <b>Pago:</b> {ev.monto ? `${ev.monto} · ` : ""}{ev.comprobanteTexto || ""} {ev.comprobanteLink && <a href={ev.comprobanteLink} target="_blank" rel="noreferrer" style={{ color: ACCENT, textDecoration: "underline" }}>Ver comprobante</a>}
+        </p>
+      )}
+      {ev.estadoPago === "parcial" && (
+        <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: PARCIAL, marginBottom: 6, fontWeight: 600 }}>
+          Seña/adelanto: $ {Number(ev.adelanto) || 0} de $ {Number(ev.monto) || 0} — Falta facturar: $ {(Number(ev.monto) || 0) - (Number(ev.adelanto) || 0)}
+          {ev.conceptoAdelanto ? ` (${ev.conceptoAdelanto})` : ""}
         </p>
       )}
       {ev.comanda?.cubiertos && <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}><b>Comanda:</b> {ev.comanda.cubiertos} cubiertos {ev.comanda.detalle ? `· ${ev.comanda.detalle}` : ""}</p>}
@@ -1232,6 +1264,7 @@ export default function App() {
   const [ready, setReady] = useState(false);
   const [role, setRole] = useState(null);
   const [pin, setPin] = useState(null);
+  const [proximoVale, setProximoVale] = useState(1);
   const [events, setEvents] = useState([]);
   const [jefeAreas, setJefeAreas] = useState({ telefono: "" });
   const [tarifas, setTarifas] = useState({});
@@ -1249,11 +1282,11 @@ export default function App() {
       const [ev, jefe, cfg, planos, tar] = await Promise.all([
         loadShared("eventos", []),
         loadShared("jefeAreas", { telefono: "" }),
-        loadShared("config", { pin: null }),
+        loadShared("config", { pin: null, proximoVale: 1 }),
         loadShared("planos", {}),
         loadShared("tarifas", {}),
       ]);
-      setEvents(ev); setJefeAreas(jefe); setPin(cfg.pin); setFloorplans(planos); setTarifas(tar);
+      setEvents(ev); setJefeAreas(jefe); setPin(cfg.pin); setProximoVale(cfg.proximoVale || 1); setFloorplans(planos); setTarifas(tar);
       setReady(true);
     })();
   }, []);
@@ -1263,16 +1296,24 @@ export default function App() {
   useEffect(() => { if (ready) saveShared("planos", floorplans); }, [floorplans, ready]);
   useEffect(() => { if (ready) saveShared("tarifas", tarifas); }, [tarifas, ready]);
 
-  const setPinIfEmpty = (p) => { setPin(p); saveShared("config", { pin: p }); };
+  const setPinIfEmpty = (p) => { setPin(p); saveShared("config", { pin: p, proximoVale }); };
 
   const isAdmin = role === "admin";
 
   const handleSaveEvent = (ev) => {
+    let toSave = ev;
+    if (ev.estadoPago === "cp" && !ev.vale?.numero) {
+      const numero = proximoVale;
+      const siguiente = proximoVale + 1;
+      setProximoVale(siguiente);
+      saveShared("config", { pin, proximoVale: siguiente });
+      toSave = { ...ev, vale: { ...ev.vale, numero: String(numero) } };
+    }
     setEvents(prev => {
-      const exists = prev.some(e => e.id === ev.id);
-      return exists ? prev.map(e => e.id === ev.id ? ev : e) : [...prev, ev];
+      const exists = prev.some(e => e.id === toSave.id);
+      return exists ? prev.map(e => e.id === toSave.id ? toSave : e) : [...prev, toSave];
     });
-    setSelectedEvent(ev); setEditingEvent(null); setNewEventDate(null); setView("ficha");
+    setSelectedEvent(toSave); setEditingEvent(null); setNewEventDate(null); setView("ficha");
   };
   const handleDeleteEvent = (id) => {
     setEvents(prev => prev.filter(e => e.id !== id));

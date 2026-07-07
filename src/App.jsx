@@ -252,6 +252,10 @@ function blankEvent(fecha) {
     tarifaTipo: "completa",
     tarifaEspecialActiva: false, tarifaEspecial: "",
     valorSalon: "", // snapshot histórico del valor de salón aplicado al momento de guardar
+    // Salones adicionales: para cuando la misma empresa/planilla usa dos (o más) salones
+    // en simultáneo (ej: Salón Argos + Sala 1). Cada uno con su propia tarifa, congelada
+    // al guardar igual que el salón principal.
+    salonesAdicionales: [],
     empresaOrganiza: "", empresaContrata: "", empresaPaga: "",
     contactoNombre: "", contactoVia: "",
     esHuesped: false,
@@ -278,15 +282,44 @@ function blankEvent(fecha) {
 // del hotel (neto = total / 1.21, IVA = total - neto).
 // valorSalonOverride se usa mientras se está editando el formulario (antes de guardar), porque
 // ahí ev.valorSalon todavía no se actualizó con el valor vigente de la tarifa/tarifa especial.
-function totalItemsEvento(ev, valorSalonOverride) {
+// salonesAdicionalesOverride se usa mientras se está editando el formulario (antes de guardar),
+// igual que valorSalonOverride: mientras se edita, cada salón adicional todavía no tiene su
+// valorSalon congelado, así que EventForm pasa la versión calculada en vivo.
+function totalItemsEvento(ev, valorSalonOverride, salonesAdicionalesOverride) {
   const items = ev.itemsPresupuesto || [];
   const valorSalon = valorSalonOverride != null ? (Number(valorSalonOverride) || 0) : (Number(ev.valorSalon) || 0);
   const filaSalon = ev.salon ? [{ id: "auto-salon", detalle: `Salón (${ev.salon})`, cantidad: 1, valorUnitario: valorSalon, auto: true }] : [];
-  const filas = [...filaSalon, ...items];
+
+  const adicionales = salonesAdicionalesOverride || ev.salonesAdicionales || [];
+  const filasAdicionales = adicionales.filter(sa => sa.salon).map(sa => ({
+    id: `auto-salon-${sa.id}`, detalle: `Salón (${sa.salon}) — adicional`, cantidad: 1,
+    valorUnitario: Number(sa.valorSalon) || 0, auto: true,
+  }));
+
+  // Cubiertos vendidos (comida) cargados en el Vale: se suman automáticamente acá para
+  // que la cotización/voucher y el estado de pago siempre coincidan con lo que se cargó
+  // en el Vale (salón + comida del vale).
+  const filasVale = (ev.vale?.tipos || []).map(t => ({
+    id: `auto-vale-${t.id}`, detalle: `${t.tipo} (según vale)`,
+    cantidad: Number(t.cantidad) || 0, valorUnitario: Number(t.valorUnitario) || 0, auto: true,
+  }));
+
+  const filas = [...filaSalon, ...filasAdicionales, ...filasVale, ...items];
   const totalConIva = filas.reduce((s, i) => s + (Number(i.cantidad) || 0) * (Number(i.valorUnitario) || 0), 0);
   const sinIva = totalConIva / 1.21;
   const iva = totalConIva - sinIva;
   return { filas, sinIva, iva, totalConIva };
+}
+
+// Texto para mostrar salón principal + adicionales juntos (ej: "Salón Argos + Sala 1")
+function salonesTexto(ev) {
+  const nombres = [ev.salon, ...((ev.salonesAdicionales || []).map(sa => sa.salon))].filter(Boolean);
+  return nombres.length ? nombres.join(" + ") : "";
+}
+
+function tarifaLabel(ev) {
+  if (ev.tarifaEspecialActiva) return "Tarifa especial";
+  return ev.tarifaTipo === "completa" ? "Tarifa completa" : "Media tarifa";
 }
 
 /* ============================================================
@@ -608,7 +641,27 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
   // se respeta; si es un evento nuevo o se tocó la tarifa, se recalcula una sola vez al guardar.
   const valorSalonAplicar = ev.tarifaEspecialActiva ? (Number(ev.tarifaEspecial) || 0) : (Number(tarifaValor) || 0);
 
-  const guardar = () => onSave({ ...ev, salon: salonFinal, valorSalon: valorSalonAplicar });
+  // Salones adicionales (misma empresa/planilla usando 2+ salones en simultáneo).
+  // Igual que con el salón principal: mientras se edita, se calcula en vivo el valor
+  // según tarifario/tarifa especial; recién se congela en "valorSalon" al guardar.
+  const setSalonesAdicionales = (arr) => setEv(prev => ({ ...prev, salonesAdicionales: arr }));
+  const salonesAdicionalesConValor = (ev.salonesAdicionales || []).map(sa => {
+    const saSalonFinal = sa.salon === "Otro" ? sa.salonOtro : sa.salon;
+    const saTarifa = tarifas?.[saSalonFinal];
+    const saTarifaValor = sa.tarifaTipo === "completa" ? saTarifa?.completa : saTarifa?.media;
+    const valorSalon = sa.tarifaEspecialActiva ? (Number(sa.tarifaEspecial) || 0) : (Number(saTarifaValor) || 0);
+    return { ...sa, salon: saSalonFinal, valorSalon };
+  });
+  const agregarSalonAdicional = () => setSalonesAdicionales([
+    ...(ev.salonesAdicionales || []),
+    { id: uid(), salon: "", salonOtro: "", tarifaTipo: "completa", tarifaEspecialActiva: false, tarifaEspecial: "" },
+  ]);
+  const actualizarSalonAdicional = (id, k, v) => setSalonesAdicionales(
+    (ev.salonesAdicionales || []).map(sa => sa.id === id ? { ...sa, [k]: v } : sa)
+  );
+  const quitarSalonAdicional = (id) => setSalonesAdicionales((ev.salonesAdicionales || []).filter(sa => sa.id !== id));
+
+  const guardar = () => onSave({ ...ev, salon: salonFinal, valorSalon: valorSalonAplicar, salonesAdicionales: salonesAdicionalesConValor });
 
   return (
     <div className="p-5 rounded" style={{ background: CARD, border: `1px solid ${LINE}` }}>
@@ -684,6 +737,52 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
           El valor de salón que quede aplicado (especial o de tarifario) se guarda tal cual con la ficha: si el tarifario general cambia más adelante, este evento ya realizado no se ve afectado.
         </p>
       </Field>
+
+      <div className="p-3 rounded mb-4" style={{ background: HILITE_BG, border: `1px solid ${LINE}` }}>
+        <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: MUTED, marginBottom: 10 }}>
+          Salones adicionales (misma empresa usando 2 o más salones a la vez)
+        </p>
+        {(ev.salonesAdicionales || []).map(sa => {
+          const saSalonFinal = sa.salon === "Otro" ? sa.salonOtro : sa.salon;
+          const saTarifa = tarifas?.[saSalonFinal];
+          const saTarifaValor = sa.tarifaTipo === "completa" ? saTarifa?.completa : saTarifa?.media;
+          return (
+            <div key={sa.id} className="p-2.5 rounded mb-2" style={{ background: CARD, border: `1px solid ${LINE}` }}>
+              <div className="grid grid-cols-2 gap-x-4">
+                <Field label="Salón adicional">
+                  <select style={inputStyle} value={sa.salon} onChange={e => actualizarSalonAdicional(sa.id, "salon", e.target.value)}>
+                    <option value="">Elegir salón…</option>
+                    {SALONES_FIJOS.map(s => <option key={s} value={s}>{s}</option>)}
+                    <option value="Otro">Otro…</option>
+                  </select>
+                  {sa.salon === "Otro" && <input style={{ ...inputStyle, marginTop: 8 }} placeholder="Nombre del salón" value={sa.salonOtro} onChange={e => actualizarSalonAdicional(sa.id, "salonOtro", e.target.value)} />}
+                </Field>
+                <Field label="Tarifa">
+                  <div className="flex gap-3 items-center flex-wrap">
+                    <label className="flex items-center gap-1.5"><input type="radio" disabled={sa.tarifaEspecialActiva} checked={sa.tarifaTipo === "completa"} onChange={() => actualizarSalonAdicional(sa.id, "tarifaTipo", "completa")} /><span style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK }}>Completa</span></label>
+                    <label className="flex items-center gap-1.5"><input type="radio" disabled={sa.tarifaEspecialActiva} checked={sa.tarifaTipo === "media"} onChange={() => actualizarSalonAdicional(sa.id, "tarifaTipo", "media")} /><span style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK }}>Media</span></label>
+                  </div>
+                  {saSalonFinal && !sa.tarifaEspecialActiva && (
+                    <span style={{ fontFamily: FONT_MONO, fontSize: 12.5, color: ACCENT }}>{saTarifaValor ? `$ ${saTarifaValor}` : "Sin tarifa configurada"}</span>
+                  )}
+                </Field>
+              </div>
+              <label className="flex items-center gap-1.5 mb-2">
+                <input type="checkbox" checked={!!sa.tarifaEspecialActiva} onChange={e => actualizarSalonAdicional(sa.id, "tarifaEspecialActiva", e.target.checked)} />
+                <span style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK }}>Usar tarifa especial para este salón</span>
+              </label>
+              {sa.tarifaEspecialActiva && (
+                <input type="number" style={{ ...inputStyle, marginBottom: 8 }} value={sa.tarifaEspecial} onChange={e => actualizarSalonAdicional(sa.id, "tarifaEspecial", e.target.value)} placeholder="Valor especial del salón $" />
+              )}
+              <button type="button" onClick={() => quitarSalonAdicional(sa.id)} className="text-xs" style={{ color: PENDIENTE }}>Quitar este salón adicional</button>
+            </div>
+          );
+        })}
+        <button type="button" onClick={agregarSalonAdicional} className="px-3 py-2 rounded text-sm" style={{ background: INK_SOFT, color: PAPER }}>+ Agregar otro salón</button>
+        <p style={{ fontFamily: FONT_BODY, fontSize: 11, color: MUTED, marginTop: 8 }}>
+          Usalo cuando la misma empresa contrata dos salones para el mismo evento (ej: Salón Argos + Sala 1). Cada uno se agrega solo, con su propio valor, a la cotización de abajo.
+        </p>
+      </div>
 
       <Field label="Incluye (catering / comida)">
         <div className="flex flex-wrap gap-2 mb-2">
@@ -764,6 +863,24 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
                 <td></td>
               </tr>
             )}
+            {salonesAdicionalesConValor.filter(sa => sa.salon).map(sa => (
+              <tr key={sa.id} style={{ borderBottom: `1px solid ${LINE}`, opacity: 0.85 }}>
+                <td className="py-1">Salón ({sa.salon}) — adicional, automático</td>
+                <td className="text-right py-1">1</td>
+                <td className="text-right py-1">$ {(Number(sa.valorSalon) || 0).toFixed(2)}</td>
+                <td className="text-right py-1">$ {(Number(sa.valorSalon) || 0).toFixed(2)}</td>
+                <td></td>
+              </tr>
+            ))}
+            {(ev.vale.tipos || []).map(t => (
+              <tr key={`vale-${t.id}`} style={{ borderBottom: `1px solid ${LINE}`, opacity: 0.85 }}>
+                <td className="py-1">{t.tipo} — según vale</td>
+                <td className="text-right py-1">{t.cantidad}</td>
+                <td className="text-right py-1">$ {(Number(t.valorUnitario) || 0).toFixed(2)}</td>
+                <td className="text-right py-1">$ {((Number(t.cantidad) || 0) * (Number(t.valorUnitario) || 0)).toFixed(2)}</td>
+                <td></td>
+              </tr>
+            ))}
             {(ev.itemsPresupuesto || []).map(it => (
               <tr key={it.id} style={{ borderBottom: `1px solid ${LINE}` }}>
                 <td className="py-1">{it.detalle}</td>
@@ -775,12 +892,12 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
             ))}
             <tr>
               <td className="py-1 font-semibold" colSpan={3}>TOTAL (con IVA incluido)</td>
-              <td className="text-right py-1 font-semibold">$ {totalItemsEvento(ev, valorSalonAplicar).totalConIva.toFixed(2)}</td>
+              <td className="text-right py-1 font-semibold">$ {totalItemsEvento(ev, valorSalonAplicar, salonesAdicionalesConValor).totalConIva.toFixed(2)}</td>
               <td></td>
             </tr>
           </tbody>
         </table>
-        <p style={{ fontFamily: FONT_BODY, fontSize: 11, color: MUTED, marginBottom: 10 }}>El salón se agrega solo, con el valor congelado de la tarifa aplicada. Acá abajo cargás vos la comida y otros ítems (lunch, coffee break, técnica, etc.).</p>
+        <p style={{ fontFamily: FONT_BODY, fontSize: 11, color: MUTED, marginBottom: 10 }}>El salón (y los salones adicionales) se agregan solos, con el valor congelado de la tarifa aplicada. Las filas "según vale" se cargan solas desde la sección de Vale, más abajo — para agregar o quitar comida del total, hacelo ahí. Acá abajo podés sumar otros ítems sueltos que no sean parte del vale (técnica, decoración, etc.).</p>
         <div className="grid grid-cols-4 gap-2 items-end">
           <Field label="Detalle"><input style={inputStyle} value={nuevoItem.detalle} onChange={e => setNuevoItem(p => ({ ...p, detalle: e.target.value }))} placeholder="Ej: Coffee break" /></Field>
           <Field label="Cantidad"><input type="number" style={inputStyle} value={nuevoItem.cantidad} onChange={e => setNuevoItem(p => ({ ...p, cantidad: e.target.value }))} placeholder="Ej: 60" /></Field>
@@ -801,7 +918,7 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
         </div>
 
         {(() => {
-          const { sinIva, iva, totalConIva } = totalItemsEvento(ev, valorSalonAplicar);
+          const { sinIva, iva, totalConIva } = totalItemsEvento(ev, valorSalonAplicar, salonesAdicionalesConValor);
           return (
             <div className="p-2.5 rounded mb-3" style={{ background: CARD, border: `1px solid ${LINE}` }}>
               <p style={{ fontFamily: FONT_MONO, fontSize: 12.5, color: INK, marginBottom: 2 }}>Total cargado (precio final, con IVA incluido): $ {totalConIva.toFixed(2)}</p>
@@ -826,7 +943,7 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
         </div>
 
         {(ev.estadoPago === "parcial" || ev.estadoPago === "sena") && (() => {
-          const { totalConIva } = totalItemsEvento(ev, valorSalonAplicar);
+          const { totalConIva } = totalItemsEvento(ev, valorSalonAplicar, salonesAdicionalesConValor);
           return (
             <div className="mt-3 p-3 rounded" style={{ background: PARCIAL_BG, border: `1px solid ${PARCIAL}` }}>
               <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: PARCIAL, marginBottom: 10, fontWeight: 600 }}>
@@ -985,7 +1102,7 @@ function EventDetail({ ev, jefeAreas, isAdmin, onEdit, onVaucher, onCronograma, 
         <div>
           {ev.colorEvento && <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: "50%", background: ev.colorEvento, marginRight: 6 }} />}
           <h3 style={{ fontFamily: FONT_HEAD, fontSize: 22, color: INK, display: "inline" }}>{ev.nombreEvento || ev.salon || "Sin nombre"}</h3>
-          <p style={{ fontFamily: FONT_BODY, fontSize: 13, color: MUTED }}>{ev.salon || "Sin salón"} · {fmtFecha(ev.fecha)} · {ev.horaInicio}–{ev.horaFin} · {ev.personas || "?"} personas</p>
+          <p style={{ fontFamily: FONT_BODY, fontSize: 13, color: MUTED }}>{salonesTexto(ev) || "Sin salón"} · {fmtFecha(ev.fecha)} · {ev.horaInicio}–{ev.horaFin} · {ev.personas || "?"} personas</p>
         </div>
         <Stamp estadoPago={ev.estadoPago} />
       </div>
@@ -1060,10 +1177,10 @@ function Voucher({ ev, onBack }) {
         <button onClick={onBack} className="px-4 py-2 rounded text-sm font-medium" style={{ border: `1px solid ${LINE}`, color: INK, fontFamily: FONT_BODY }}>Volver</button>
       </div>
       <div className="p-8" style={{ background: CARD, border: `1px solid ${INK}`, maxWidth: 640, margin: "0 auto" }}>
-        <PrintHeader eyebrow="Orden de evento" titulo={ev.nombreEvento || ev.salon || "Salón a confirmar"} />
+        <PrintHeader eyebrow="Orden de evento" titulo={ev.nombreEvento || salonesTexto(ev) || "Salón a confirmar"} />
         <div className="flex justify-end -mt-2 mb-3"><Stamp estadoPago={ev.estadoPago} /></div>
         <div className="grid grid-cols-2 gap-y-2 gap-x-6 mb-4" style={{ fontFamily: FONT_BODY, fontSize: 13.5, color: INK }}>
-          <p><b>Salón:</b> {ev.salon || "-"}</p>
+          <p><b>Salón:</b> {salonesTexto(ev) || "-"}</p>
           <p><b>Fecha:</b> {fmtFecha(ev.fecha)}</p>
           <p><b>Horario:</b> {ev.horaInicio} a {ev.horaFin}</p>
           <p><b>Personas:</b> {ev.personas || "-"}</p>
@@ -1152,7 +1269,7 @@ function Vale({ ev, onBack }) {
           <p><b>N° de vale:</b> {v.numero || "-"}</p>
           <p><b>N° de factura:</b> {ev.comprobanteTexto || "-"}</p>
           <p><b>Fecha del evento:</b> {fmtFecha(ev.fecha)}</p>
-          <p><b>Salón:</b> {ev.salon || "-"}</p>
+          <p><b>Salón:</b> {salonesTexto(ev) || "-"}</p>
           <p><b>Salones vendidos:</b> {v.salonesVendidos || "-"}</p>
           <p><b>Personas:</b> {ev.personas || "-"}</p>
         </div>
@@ -1209,13 +1326,13 @@ function Comanda({ ev, onBack }) {
         <button onClick={onBack} className="px-4 py-2 rounded text-sm font-medium" style={{ border: `1px solid ${LINE}`, color: INK, fontFamily: FONT_BODY }}>Volver</button>
       </div>
       <div className="p-8" style={{ background: CARD, border: `1px solid ${INK}`, maxWidth: 640, margin: "0 auto" }}>
-        <PrintHeader eyebrow="Comanda de cocina" titulo={ev.salon || "Salón"} />
+        <PrintHeader eyebrow="Comanda de cocina" titulo={salonesTexto(ev) || "Salón"} />
         <div className="grid grid-cols-2 gap-y-2 gap-x-6 mb-4" style={{ fontFamily: FONT_BODY, fontSize: 13.5, color: INK }}>
           <p><b>Fecha:</b> {fmtFecha(ev.fecha)}</p>
           <p><b>Horario:</b> {ev.horaInicio} a {ev.horaFin}</p>
           <p><b>Personas convocadas:</b> {ev.personas || "-"}</p>
           <p><b>Tipo de evento:</b> {ev.servicio || "-"}</p>
-          <p><b>Salón:</b> {ev.salon || "-"}</p>
+          <p><b>Salón:</b> {salonesTexto(ev) || "-"}</p>
           <p><b>Catering contratado:</b> {c.caterer || "-"}</p>
         </div>
 
@@ -1682,12 +1799,17 @@ function Stats({ events }) {
   }, [delMes]);
 
   // Cantidad de salones vendidos por mes, para cada uno de los 5 salones fijos del hotel.
+  // Cuenta el salón principal (con el "cantidad de salones vendidos" del vale) y suma
+  // además cada salón adicional cargado en la ficha (ej: Salón Argos + Sala 1 = 1 en cada uno).
   const salonesVendidos = useMemo(() => {
     const map = {};
     SALONES_FIJOS.forEach(s => { map[s] = 0; });
     delMes.forEach(e => {
       const s = e.salon;
       if (s in map) map[s] += Number(e.vale?.salonesVendidos) || 1;
+      (e.salonesAdicionales || []).forEach(sa => {
+        if (sa.salon in map) map[sa.salon] += 1;
+      });
     });
     return map;
   }, [delMes]);
@@ -1804,7 +1926,7 @@ function BuscadorPorEmpresa({ events }) {
                 <div key={e.id} className="p-2.5 rounded flex items-center justify-between" style={{ background: HILITE_BG }}>
                   <div>
                     <div style={{ fontFamily: FONT_BODY, fontWeight: 600, color: INK, fontSize: 13.5 }}>{fmtFecha(e.fecha)} — {e.nombreEvento || e.salon || "Sin nombre"}</div>
-                    <div style={{ fontFamily: FONT_BODY, fontSize: 12, color: MUTED }}>{e.salon} · {tarifaLabel(e)}</div>
+                    <div style={{ fontFamily: FONT_BODY, fontSize: 12, color: MUTED }}>{salonesTexto(e)} · {tarifaLabel(e)}</div>
                   </div>
                   <div className="text-right">
                     <div style={{ fontFamily: FONT_MONO, fontSize: 13, color: INK, fontWeight: 600 }}>$ {totalConIva.toFixed(2)}</div>

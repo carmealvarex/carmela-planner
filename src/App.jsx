@@ -272,15 +272,21 @@ function blankEvent(fecha) {
 }
 
 // Calcula el total del evento a partir de la fila automática de salón (congelada en valorSalon)
-// más los ítems de comida/otros cargados a mano. Reemplaza a los viejos campos "monto" /
-// "precio por persona": todo sale de esta única tabla, para no cargar el mismo dato dos veces.
-function totalItemsEvento(ev) {
+// más los ítems de comida/otros cargados a mano. Los precios que carga Carmela (salón e ítems)
+// son SIEMPRE precios finales, con IVA ya incluido (así se los cobra al cliente) — el programa
+// no suma IVA, lo DISCRIMINA hacia atrás a partir de ese total, igual que la factura oficial
+// del hotel (neto = total / 1.21, IVA = total - neto).
+// valorSalonOverride se usa mientras se está editando el formulario (antes de guardar), porque
+// ahí ev.valorSalon todavía no se actualizó con el valor vigente de la tarifa/tarifa especial.
+function totalItemsEvento(ev, valorSalonOverride) {
   const items = ev.itemsPresupuesto || [];
-  const valorSalon = Number(ev.valorSalon) || 0;
+  const valorSalon = valorSalonOverride != null ? (Number(valorSalonOverride) || 0) : (Number(ev.valorSalon) || 0);
   const filaSalon = ev.salon ? [{ id: "auto-salon", detalle: `Salón (${ev.salon})`, cantidad: 1, valorUnitario: valorSalon, auto: true }] : [];
   const filas = [...filaSalon, ...items];
-  const sinIva = filas.reduce((s, i) => s + (Number(i.cantidad) || 0) * (Number(i.valorUnitario) || 0), 0);
-  return { filas, sinIva, iva: sinIva * 0.21, totalConIva: sinIva * 1.21 };
+  const totalConIva = filas.reduce((s, i) => s + (Number(i.cantidad) || 0) * (Number(i.valorUnitario) || 0), 0);
+  const sinIva = totalConIva / 1.21;
+  const iva = totalConIva - sinIva;
+  return { filas, sinIva, iva, totalConIva };
 }
 
 /* ============================================================
@@ -768,8 +774,8 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
               </tr>
             ))}
             <tr>
-              <td className="py-1 font-semibold" colSpan={3}>TOTAL (sin IVA)</td>
-              <td className="text-right py-1 font-semibold">$ {totalItemsEvento(ev).sinIva.toFixed(2)}</td>
+              <td className="py-1 font-semibold" colSpan={3}>TOTAL (con IVA incluido)</td>
+              <td className="text-right py-1 font-semibold">$ {totalItemsEvento(ev, valorSalonAplicar).totalConIva.toFixed(2)}</td>
               <td></td>
             </tr>
           </tbody>
@@ -795,13 +801,13 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
         </div>
 
         {(() => {
-          const { sinIva, iva, totalConIva } = totalItemsEvento(ev);
+          const { sinIva, iva, totalConIva } = totalItemsEvento(ev, valorSalonAplicar);
           return (
             <div className="p-2.5 rounded mb-3" style={{ background: CARD, border: `1px solid ${LINE}` }}>
-              <p style={{ fontFamily: FONT_MONO, fontSize: 12.5, color: INK, marginBottom: 2 }}>Subtotal (sin IVA): $ {sinIva.toFixed(2)}</p>
-              <p style={{ fontFamily: FONT_MONO, fontSize: 12.5, color: INK, marginBottom: 2 }}>IVA (21%): $ {iva.toFixed(2)}</p>
-              <p style={{ fontFamily: FONT_MONO, fontSize: 14, color: ACCENT, fontWeight: 700 }}>Total del evento (con IVA): $ {totalConIva.toFixed(2)}</p>
-              <p style={{ fontFamily: FONT_BODY, fontSize: 11, color: MUTED, marginTop: 4 }}>Se calcula solo de la tabla de arriba (salón automático + ítems cargados), para no repetir el mismo dato dos veces.</p>
+              <p style={{ fontFamily: FONT_MONO, fontSize: 12.5, color: INK, marginBottom: 2 }}>Total cargado (precio final, con IVA incluido): $ {totalConIva.toFixed(2)}</p>
+              <p style={{ fontFamily: FONT_MONO, fontSize: 12.5, color: INK, marginBottom: 2 }}>Valor sin IVA (discriminado): $ {sinIva.toFixed(2)}</p>
+              <p style={{ fontFamily: FONT_MONO, fontSize: 14, color: ACCENT, fontWeight: 700 }}>IVA (21%, discriminado): $ {iva.toFixed(2)}</p>
+              <p style={{ fontFamily: FONT_BODY, fontSize: 11, color: MUTED, marginTop: 4 }}>Los precios que cargás arriba (salón + ítems) son siempre precios finales, con IVA incluido. El programa no suma IVA: lo discrimina hacia atrás, igual que la factura oficial del hotel.</p>
             </div>
           );
         })()}
@@ -820,7 +826,7 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
         </div>
 
         {(ev.estadoPago === "parcial" || ev.estadoPago === "sena") && (() => {
-          const { totalConIva } = totalItemsEvento(ev);
+          const { totalConIva } = totalItemsEvento(ev, valorSalonAplicar);
           return (
             <div className="mt-3 p-3 rounded" style={{ background: PARCIAL_BG, border: `1px solid ${PARCIAL}` }}>
               <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: PARCIAL, marginBottom: 10, fontWeight: 600 }}>
@@ -1738,6 +1744,90 @@ function Stats({ events }) {
           {!delMes.length && <p style={{ fontFamily: FONT_BODY, fontSize: 13, color: MUTED }}>Sin eventos cargados este mes.</p>}
         </div>
       </div>
+
+      <BuscadorPorEmpresa events={events} />
+    </div>
+  );
+}
+
+/* ============================================================
+   BUSCADOR POR EMPRESA — para cuando la misma empresa contrata
+   dos o más eventos: los agrupa y suma un total consolidado
+   (con IVA, neto discriminado, pagado y saldo).
+   ============================================================ */
+function BuscadorPorEmpresa({ events }) {
+  const [busqueda, setBusqueda] = useState("");
+  const q = busqueda.trim().toLowerCase();
+
+  const coincidencias = useMemo(() => {
+    if (!q) return [];
+    return events
+      .filter(e => [e.empresaOrganiza, e.empresaContrata, e.empresaPaga].some(v => (v || "").toLowerCase().includes(q)))
+      .sort((a, b) => a.fecha.localeCompare(b.fecha));
+  }, [events, q]);
+
+  const consolidado = useMemo(() => {
+    return coincidencias.reduce((acc, e) => {
+      const { sinIva, iva, totalConIva } = totalItemsEvento(e);
+      const pagado = (e.estadoPago === "pagado" || e.estadoPago === "total") ? totalConIva : (e.estadoPago === "parcial" || e.estadoPago === "sena") ? (Number(e.adelanto) || 0) : 0;
+      return {
+        sinIva: acc.sinIva + sinIva,
+        iva: acc.iva + iva,
+        totalConIva: acc.totalConIva + totalConIva,
+        pagado: acc.pagado + pagado,
+      };
+    }, { sinIva: 0, iva: 0, totalConIva: 0, pagado: 0 });
+  }, [coincidencias]);
+
+  return (
+    <div className="p-6 rounded" style={{ background: CARD, border: `1px solid ${LINE}` }}>
+      <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: MUTED, marginBottom: 10 }}>
+        Buscar eventos por empresa (útil cuando una misma empresa contrató varios eventos)
+      </p>
+      <input
+        style={inputStyle}
+        value={busqueda}
+        onChange={e => setBusqueda(e.target.value)}
+        placeholder="Escribí el nombre de la empresa (organiza, contrata o paga)..."
+      />
+
+      {q && !coincidencias.length && (
+        <p className="mt-3" style={{ fontFamily: FONT_BODY, fontSize: 13, color: MUTED }}>No hay eventos que coincidan con "{busqueda}".</p>
+      )}
+
+      {coincidencias.length > 0 && (
+        <>
+          <div className="flex flex-col gap-2 mt-3 mb-4">
+            {coincidencias.map(e => {
+              const { totalConIva } = totalItemsEvento(e);
+              return (
+                <div key={e.id} className="p-2.5 rounded flex items-center justify-between" style={{ background: HILITE_BG }}>
+                  <div>
+                    <div style={{ fontFamily: FONT_BODY, fontWeight: 600, color: INK, fontSize: 13.5 }}>{fmtFecha(e.fecha)} — {e.nombreEvento || e.salon || "Sin nombre"}</div>
+                    <div style={{ fontFamily: FONT_BODY, fontSize: 12, color: MUTED }}>{e.salon} · {tarifaLabel(e)}</div>
+                  </div>
+                  <div className="text-right">
+                    <div style={{ fontFamily: FONT_MONO, fontSize: 13, color: INK, fontWeight: 600 }}>$ {totalConIva.toFixed(2)}</div>
+                    <Stamp estadoPago={e.estadoPago} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="p-3 rounded" style={{ background: PARCIAL_BG, border: `1px solid ${PARCIAL}` }}>
+            <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: PARCIAL, marginBottom: 8, fontWeight: 600 }}>
+              Consolidado de {coincidencias.length} evento{coincidencias.length === 1 ? "" : "s"} — "{busqueda}"
+            </p>
+            <p style={{ fontFamily: FONT_MONO, fontSize: 12.5, color: INK }}>Total sin IVA (discriminado): $ {consolidado.sinIva.toFixed(2)}</p>
+            <p style={{ fontFamily: FONT_MONO, fontSize: 12.5, color: INK }}>IVA (21%, discriminado): $ {consolidado.iva.toFixed(2)}</p>
+            <p style={{ fontFamily: FONT_MONO, fontSize: 14, color: PARCIAL, fontWeight: 700 }}>Total consolidado (con IVA): $ {consolidado.totalConIva.toFixed(2)}</p>
+            <div style={{ height: 1, background: PARCIAL, opacity: 0.3, margin: "8px 0" }} />
+            <p style={{ fontFamily: FONT_MONO, fontSize: 12.5, color: INK }}>Pagado en total: $ {consolidado.pagado.toFixed(2)}</p>
+            <p style={{ fontFamily: FONT_MONO, fontSize: 12.5, color: INK, fontWeight: 700 }}>Falta facturar/cobrar: $ {(consolidado.totalConIva - consolidado.pagado).toFixed(2)}</p>
+          </div>
+        </>
+      )}
     </div>
   );
 }

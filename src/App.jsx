@@ -235,6 +235,7 @@ function blankEvent(fecha) {
     empresaOrganiza: "", empresaContrata: "", empresaPaga: "",
     estadoPago: "pendiente", monto: "", adelanto: "", comprobanteTexto: "", comprobanteLink: "",
     precioPorPersona: "",
+    itemsPresupuesto: [],
     vale: { numero: "", tipo: "Coffee break", cantidad: "", precioUnitario: "", concepto: "" },
     comanda: { cubiertos: "", detalle: "" },
     cronograma: [],
@@ -491,6 +492,13 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
   const set = (k, v) => setEv(prev => ({ ...prev, [k]: v }));
   const setVale = (k, v) => setEv(prev => ({ ...prev, vale: { ...prev.vale, [k]: v } }));
   const setComanda = (k, v) => setEv(prev => ({ ...prev, comanda: { ...prev.comanda, [k]: v } }));
+  const [nuevoItem, setNuevoItem] = useState({ detalle: "", cantidad: "", valorUnitario: "" });
+  const agregarItem = () => {
+    if (!nuevoItem.detalle.trim() || !nuevoItem.cantidad || !nuevoItem.valorUnitario) return;
+    setEv(prev => ({ ...prev, itemsPresupuesto: [...(prev.itemsPresupuesto || []), { id: uid(), ...nuevoItem }] }));
+    setNuevoItem({ detalle: "", cantidad: "", valorUnitario: "" });
+  };
+  const quitarItem = (id) => setEv(prev => ({ ...prev, itemsPresupuesto: (prev.itemsPresupuesto || []).filter(i => i.id !== id) }));
   const toggleIncluye = (item) => setEv(prev => ({ ...prev, incluye: prev.incluye.includes(item) ? prev.incluye.filter(i => i !== item) : [...prev.incluye, item] }));
   const [nuevoIncluye, setNuevoIncluye] = useState("");
   const toggleTecnica = (item) => setEv(prev => ({ ...prev, tecnica: (prev.tecnica || []).includes(item) ? prev.tecnica.filter(i => i !== item) : [...(prev.tecnica || []), item] }));
@@ -616,6 +624,45 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
       </div>
 
       <div className="p-3 rounded mb-4" style={{ background: HILITE_BG, border: `1px solid ${LINE}` }}>
+        <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: MUTED, marginBottom: 10 }}>Ítems del presupuesto (tabla del voucher, ej: salón, lunch, coffee break)</p>
+        {(ev.itemsPresupuesto || []).length > 0 && (
+          <table className="w-full mb-3" style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: INK, borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ borderBottom: `1px solid ${LINE}` }}>
+                <th className="text-left py-1">Detalle</th>
+                <th className="text-right py-1">Cant.</th>
+                <th className="text-right py-1">Valor uni.</th>
+                <th className="text-right py-1">Valor total</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {ev.itemsPresupuesto.map(it => (
+                <tr key={it.id} style={{ borderBottom: `1px solid ${LINE}` }}>
+                  <td className="py-1">{it.detalle}</td>
+                  <td className="text-right py-1">{it.cantidad}</td>
+                  <td className="text-right py-1">$ {Number(it.valorUnitario).toFixed(2)}</td>
+                  <td className="text-right py-1">$ {(Number(it.cantidad) * Number(it.valorUnitario)).toFixed(2)}</td>
+                  <td className="text-right py-1"><button type="button" onClick={() => quitarItem(it.id)} style={{ color: PENDIENTE, fontSize: 11 }}>Quitar</button></td>
+                </tr>
+              ))}
+              <tr>
+                <td className="py-1 font-semibold" colSpan={3}>TOTAL</td>
+                <td className="text-right py-1 font-semibold">$ {ev.itemsPresupuesto.reduce((s, i) => s + Number(i.cantidad) * Number(i.valorUnitario), 0).toFixed(2)}</td>
+                <td></td>
+              </tr>
+            </tbody>
+          </table>
+        )}
+        <div className="grid grid-cols-4 gap-2 items-end">
+          <Field label="Detalle"><input style={inputStyle} value={nuevoItem.detalle} onChange={e => setNuevoItem(p => ({ ...p, detalle: e.target.value }))} placeholder="Ej: Salón Argos" /></Field>
+          <Field label="Cantidad"><input type="number" style={inputStyle} value={nuevoItem.cantidad} onChange={e => setNuevoItem(p => ({ ...p, cantidad: e.target.value }))} placeholder="Ej: 60" /></Field>
+          <Field label="Valor unitario"><input type="number" style={inputStyle} value={nuevoItem.valorUnitario} onChange={e => setNuevoItem(p => ({ ...p, valorUnitario: e.target.value }))} placeholder="Ej: 20000" /></Field>
+          <button type="button" onClick={agregarItem} className="px-3 py-2 rounded text-sm mb-4" style={{ background: INK_SOFT, color: PAPER }}>+ Agregar ítem</button>
+        </div>
+      </div>
+
+      <div className="p-3 rounded mb-4" style={{ background: HILITE_BG, border: `1px solid ${LINE}` }}>
         <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: MUTED, marginBottom: 10 }}>Estado de pago</p>
         <div className="flex gap-4 mb-3 flex-wrap">
           {[["pagado", "Pagado"], ["pendiente", "Pendiente"], ["parcial", "Pago parcial (seña)"], ["cp", "CP (contado pendiente)"]].map(([v, l]) => (
@@ -634,7 +681,8 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
           <Field label="Link a comprobante"><input style={inputStyle} value={ev.comprobanteLink} onChange={e => set("comprobanteLink", e.target.value)} placeholder="Link a Drive/Dropbox" /></Field>
         </div>
         {(ev.precioPorPersona || ev.monto) && (() => {
-          const totalConIva = ev.precioPorPersona && ev.personas ? Number(ev.precioPorPersona) * Number(ev.personas) : Number(ev.monto) || 0;
+          const sumaItems = (ev.itemsPresupuesto || []).reduce((s, i) => s + Number(i.cantidad) * Number(i.valorUnitario), 0);
+          const totalConIva = sumaItems || (ev.precioPorPersona && ev.personas ? Number(ev.precioPorPersona) * Number(ev.personas) : Number(ev.monto) || 0);
           const sinIva = totalConIva / 1.21;
           const iva = totalConIva - sinIva;
           return (
@@ -791,9 +839,11 @@ function EventDetail({ ev, jefeAreas, isAdmin, onEdit, onVaucher, onCronograma, 
    ============================================================ */
 function Voucher({ ev, onBack }) {
   const personas = Number(ev.personas) || 0;
-  const totalConIva = ev.precioPorPersona && personas
+  const items = ev.itemsPresupuesto || [];
+  const sumaItems = items.reduce((s, i) => s + Number(i.cantidad) * Number(i.valorUnitario), 0);
+  const totalConIva = sumaItems || (ev.precioPorPersona && personas
     ? Number(ev.precioPorPersona) * personas
-    : Number(ev.monto) || 0;
+    : Number(ev.monto) || 0);
   const sinIva = totalConIva / 1.21;
   const iva = totalConIva - sinIva;
   const pagado = ev.estadoPago === "pagado" ? totalConIva : (Number(ev.adelanto) || 0);
@@ -824,12 +874,44 @@ function Voucher({ ev, onBack }) {
           <p><b>Paga:</b> {ev.empresaPaga || "-"}</p>
         </div>
 
+        {items.length > 0 && (
+          <div className="mb-4">
+            <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: INK, marginBottom: 6, fontWeight: 600 }}>Cotización del evento</p>
+            <table className="w-full" style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK, borderCollapse: "collapse", border: `1px solid ${INK}` }}>
+              <thead>
+                <tr style={{ background: HILITE_BG }}>
+                  <th className="text-left p-2" style={{ border: `1px solid ${LINE}` }}>Detalle</th>
+                  <th className="text-center p-2" style={{ border: `1px solid ${LINE}` }}>Cant.</th>
+                  <th className="text-right p-2" style={{ border: `1px solid ${LINE}` }}>Valor uni.</th>
+                  <th className="text-right p-2" style={{ border: `1px solid ${LINE}` }}>Valor total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map(it => (
+                  <tr key={it.id}>
+                    <td className="p-2" style={{ border: `1px solid ${LINE}` }}>{it.detalle}</td>
+                    <td className="text-center p-2" style={{ border: `1px solid ${LINE}` }}>{it.cantidad}</td>
+                    <td className="text-right p-2" style={{ border: `1px solid ${LINE}` }}>$ {Number(it.valorUnitario).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</td>
+                    <td className="text-right p-2" style={{ border: `1px solid ${LINE}` }}>$ {(Number(it.cantidad) * Number(it.valorUnitario)).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</td>
+                  </tr>
+                ))}
+                <tr style={{ background: HILITE_BG, fontWeight: 700 }}>
+                  <td className="p-2" colSpan={3} style={{ border: `1px solid ${LINE}` }}>TOTAL</td>
+                  <td className="text-right p-2" style={{ border: `1px solid ${LINE}` }}>$ {sumaItems.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        )}
+
         <div className="p-3 mb-4 rounded" style={{ background: PARCIAL_BG, border: `1px solid ${PARCIAL}`, fontFamily: FONT_BODY, fontSize: 13.5, color: INK }}>
           <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: PARCIAL, marginBottom: 8, fontWeight: 600 }}>Detalle de facturación</p>
-          <p><b>Ítems de comida:</b> {ev.incluye?.length ? ev.incluye.join(", ") : "-"}</p>
-          <p><b>Precio por persona:</b> {ev.precioPorPersona ? `$ ${ev.precioPorPersona}` : "-"}</p>
-          <p><b>Cantidad de personas:</b> {ev.personas || "-"}</p>
-          <div style={{ height: 1, background: PARCIAL, opacity: 0.3, margin: "8px 0" }} />
+          {!items.length && <>
+            <p><b>Ítems de comida:</b> {ev.incluye?.length ? ev.incluye.join(", ") : "-"}</p>
+            <p><b>Precio por persona:</b> {ev.precioPorPersona ? `$ ${ev.precioPorPersona}` : "-"}</p>
+            <p><b>Cantidad de personas:</b> {ev.personas || "-"}</p>
+            <div style={{ height: 1, background: PARCIAL, opacity: 0.3, margin: "8px 0" }} />
+          </>}
           <p><b>Valor sin IVA:</b> $ {sinIva.toFixed(2)}</p>
           <p><b>IVA (21%):</b> $ {iva.toFixed(2)}</p>
           <p style={{ fontWeight: 700 }}><b>Precio total (con IVA):</b> $ {totalConIva.toFixed(2)}</p>
@@ -1126,7 +1208,7 @@ function ImportICS({ onImport }) {
    encima, específico para este evento; la plantilla original
    nunca se modifica.
    ============================================================ */
-function PlanoEditor({ salon, plantilla, dibujoInicial, onGuardar, onBack }) {
+function PlanoEditor({ salon, plantilla, dibujoInicial, onGuardar, onBack, isAdmin }) {
   const canvasRef = useRef(null);
   const [color, setColor] = useState("#96453A");
   const [grosor, setGrosor] = useState(3);
@@ -1160,6 +1242,7 @@ function PlanoEditor({ salon, plantilla, dibujoInicial, onGuardar, onBack }) {
   };
 
   const startDraw = (e) => {
+    if (!isAdmin) return;
     e.preventDefault();
     dibujandoRef.current = true;
     const ctx = canvasRef.current.getContext("2d");
@@ -1168,6 +1251,7 @@ function PlanoEditor({ salon, plantilla, dibujoInicial, onGuardar, onBack }) {
     ctx.moveTo(x, y);
   };
   const draw = (e) => {
+    if (!isAdmin) return;
     if (!dibujandoRef.current) return;
     e.preventDefault();
     const ctx = canvasRef.current.getContext("2d");
@@ -1207,20 +1291,25 @@ function PlanoEditor({ salon, plantilla, dibujoInicial, onGuardar, onBack }) {
     <div>
       <div className="no-print flex gap-2 mb-4 flex-wrap items-center">
         <button onClick={() => window.print()} className="px-4 py-2 rounded text-sm font-medium" style={{ background: INK_SOFT, color: PAPER, fontFamily: FONT_BODY }}>Imprimir plano</button>
-        <button onClick={guardar} className="px-4 py-2 rounded text-sm font-medium" style={{ background: PAGADO, color: PAPER, fontFamily: FONT_BODY }}>{guardado ? "¡Guardado!" : "Guardar dibujo del evento"}</button>
-        <button onClick={borrarDibujo} className="px-3 py-2 rounded text-xs font-medium" style={{ border: `1px solid ${PENDIENTE}`, color: PENDIENTE, fontFamily: FONT_BODY }}>Borrar y volver a la plantilla</button>
-        <div className="flex items-center gap-1.5 px-2">
-          <span style={{ fontFamily: FONT_BODY, fontSize: 12, color: MUTED }}>Color:</span>
-          {["#96453A", "#4A6FA5", "#5C7A5E", "#2C1F1B"].map(c => (
-            <button key={c} onClick={() => setColor(c)} style={{ width: 20, height: 20, borderRadius: "50%", background: c, border: color === c ? `2px solid ${INK}` : `1px solid ${LINE}` }} />
-          ))}
-        </div>
-        <div className="flex items-center gap-1.5">
-          <span style={{ fontFamily: FONT_BODY, fontSize: 12, color: MUTED }}>Grosor:</span>
-          {[2, 4, 7].map(g => (
-            <button key={g} onClick={() => setGrosor(g)} className="text-xs px-2 py-1 rounded" style={{ border: `1px solid ${grosor === g ? ACCENT : LINE}`, background: grosor === g ? ACCENT : "transparent", color: grosor === g ? "#fff" : INK }}>{g}</button>
-          ))}
-        </div>
+        {isAdmin && <button onClick={guardar} className="px-4 py-2 rounded text-sm font-medium" style={{ background: PAGADO, color: PAPER, fontFamily: FONT_BODY }}>{guardado ? "¡Guardado!" : "Guardar dibujo del evento"}</button>}
+        {isAdmin && <button onClick={borrarDibujo} className="px-3 py-2 rounded text-xs font-medium" style={{ border: `1px solid ${PENDIENTE}`, color: PENDIENTE, fontFamily: FONT_BODY }}>Borrar y volver a la plantilla</button>}
+        {isAdmin && (
+          <div className="flex items-center gap-1.5 px-2">
+            <span style={{ fontFamily: FONT_BODY, fontSize: 12, color: MUTED }}>Color:</span>
+            {["#96453A", "#4A6FA5", "#5C7A5E", "#2C1F1B", "#FFFFFF"].map(c => (
+              <button key={c} onClick={() => setColor(c)} style={{ width: 20, height: 20, borderRadius: "50%", background: c, border: color === c ? `2px solid ${INK}` : `1px solid ${LINE}` }} />
+            ))}
+          </div>
+        )}
+        {isAdmin && (
+          <div className="flex items-center gap-1.5">
+            <span style={{ fontFamily: FONT_BODY, fontSize: 12, color: MUTED }}>Grosor:</span>
+            {[2, 4, 7].map(g => (
+              <button key={g} onClick={() => setGrosor(g)} className="text-xs px-2 py-1 rounded" style={{ border: `1px solid ${grosor === g ? ACCENT : LINE}`, background: grosor === g ? ACCENT : "transparent", color: grosor === g ? "#fff" : INK }}>{g}</button>
+            ))}
+          </div>
+        )}
+        {!isAdmin && <span style={{ fontFamily: FONT_BODY, fontSize: 12, color: MUTED }}>Solo lectura · el invitado no puede dibujar</span>}
         <button onClick={onBack} className="px-4 py-2 rounded text-sm font-medium ml-auto" style={{ border: `1px solid ${LINE}`, color: INK, fontFamily: FONT_BODY }}>Volver</button>
       </div>
       <div className="p-6" style={{ background: CARD, border: `1px solid ${INK}`, maxWidth: 640, margin: "0 auto" }}>
@@ -1229,10 +1318,12 @@ function PlanoEditor({ salon, plantilla, dibujoInicial, onGuardar, onBack }) {
           ref={canvasRef}
           onMouseDown={startDraw} onMouseMove={draw} onMouseUp={endDraw} onMouseLeave={endDraw}
           onTouchStart={startDraw} onTouchMove={draw} onTouchEnd={endDraw}
-          style={{ width: "100%", borderRadius: 4, border: `1px solid ${LINE}`, touchAction: "none", cursor: "crosshair" }}
+          style={{ width: "100%", borderRadius: 4, border: `1px solid ${LINE}`, touchAction: "none", cursor: isAdmin ? "crosshair" : "default" }}
         />
         <p className="no-print" style={{ fontFamily: FONT_BODY, fontSize: 12, color: MUTED, marginTop: 8 }}>
-          Dibujá directamente sobre el plano con el dedo o el mouse para armar la disposición de este evento en particular. La plantilla original del salón (en Ajustes) no se modifica.
+          {isAdmin
+            ? "Dibujá directamente sobre el plano con el dedo o el mouse para armar la disposición de este evento en particular. La plantilla original del salón (en Ajustes) no se modifica."
+            : "Este plano es de solo lectura para invitados."}
         </p>
       </div>
     </div>
@@ -1603,6 +1694,7 @@ export default function App() {
             dibujoInicial={selectedEvent.planoDibujo}
             onGuardar={handleSavePlano}
             onBack={() => setView("ficha")}
+            isAdmin={isAdmin}
           />
         )}
 

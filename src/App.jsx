@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { loadShared, saveShared } from "./lib/supabaseStorage.js";
 
 /* ============================================================
@@ -36,11 +36,22 @@ const DIAS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "
 const DIAS_CORTOS = ["Lu", "Ma", "Mi", "Ju", "Vi", "Sá", "Do"];
 const MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
 
-const INCLUYE_SUGERIDOS = ["Armado de foyer","Sonido exterior","Micrófonos","Proyector","Escenario","Iluminación especial","Pantalla LED","Wifi dedicado","Estacionamiento VIP"];
+const CATERING_SUGERIDOS = ["Café", "Agua", "Coffee break", "Caramelos", "Finger food", "Cóctel", "Menú especial", "Almuerzo", "Cena", "Otros"];
+
+const TECNICA_SUGERIDOS = ["Proyector", "Rotafolio", "Pantalla", "Micrófonos", "Alquiler de pantalla aparte", "Sonido", "Wifi dedicado", "Iluminación especial"];
 
 const SALONES_FIJOS = ["Salón Argos", "Sala España", "Sala 1", "Sala 2", "Salón Auditorio"];
 
 const VALE_TIPOS = ["Coffee break", "Almuerzo", "Cena", "Desayuno", "Brindis", "Otro"];
+
+const COLORES_EVENTO = [
+  { nombre: "Rosa marca", valor: "#AE8983" },
+  { nombre: "Verde", valor: "#5C7A5E" },
+  { nombre: "Azul", valor: "#4A6FA5" },
+  { nombre: "Mostaza", valor: "#8C6A1E" },
+  { nombre: "Rojo", valor: "#96453A" },
+  { nombre: "Gris marca", valor: "#4F3C37" },
+];
 
 function uid() { return Math.random().toString(36).slice(2, 10); }
 
@@ -90,7 +101,7 @@ function getMonthGrid(year, month) {
    ============================================================ */
 function estadoTexto(ev) {
   if (ev.estadoPago === "pagado") return "Pagado ✅";
-  if (ev.estadoPago === "cp") return "CP (contado pendiente) — vale emitido 🧾";
+  if (ev.estadoPago === "cp") return "Pendiente de facturación previa al evento 🧾";
   if (ev.estadoPago === "parcial") {
     const total = Number(ev.monto) || 0;
     const pagado = Number(ev.adelanto) || 0;
@@ -102,26 +113,28 @@ function estadoTexto(ev) {
 
 function checklistTexto(ev) {
   const items = [];
-  items.push(`Catering/Comida: ${ev.catering ? "Sí" : "No"}`);
-  items.push(`Coffee break: ${ev.coffeeBreak ? "Sí" : "No"}`);
-  items.push(`Armado fuera del salón: ${ev.armadoFuera ? "Sí" : "No"}`);
+  if (ev.incluye?.length) items.push(`Incluye: ${ev.incluye.join(", ")}`);
+  if (ev.tecnica?.length) items.push(`Técnica: ${ev.tecnica.join(", ")}`);
   return items.join(" · ");
 }
 
 function textoEvento(ev) {
   const lineas = [];
-  lineas.push(`*${fmtFecha(ev.fecha)}*`);
-  lineas.push(`Salón ${ev.salon || "(sin definir)"} — ${ev.personas || "-"} personas — ${ev.horaInicio || "--:--"} a ${ev.horaFin || "--:--"}`);
+  lineas.push(`*Nombre de evento:* ${ev.nombreEvento || ev.servicio || "(sin nombre)"}`);
+  lineas.push(`Horario: ${ev.horaInicio || "--:--"} a ${ev.horaFin || "--:--"}`);
+  lineas.push(`Fecha: ${fmtFecha(ev.fecha)}`);
+  lineas.push(`Cantidad de personas: ${ev.personas || "-"}`);
+  lineas.push(`Salón: ${ev.salon || "(sin definir)"}`);
+  if (ev.servicio) lineas.push(`Concepto: ${ev.servicio}`);
   if (ev.tarifaTipo) lineas.push(`Tarifa: ${ev.tarifaTipo === "completa" ? "Completa" : "Media tarifa"}`);
-  if (ev.servicio) lineas.push(`Servicio: ${ev.servicio}`);
-  lineas.push(checklistTexto(ev));
-  if (ev.incluye?.length) lineas.push(`Incluye: ${ev.incluye.join(", ")}`);
+  const check = checklistTexto(ev);
+  if (check) lineas.push(check);
+  if (ev.formatoArmado) lineas.push(`Formato de armado: ${ev.formatoArmado}`);
   const empresas = [];
   if (ev.empresaOrganiza) empresas.push(`Organiza: ${ev.empresaOrganiza}`);
   if (ev.empresaContrata) empresas.push(`Contrata: ${ev.empresaContrata}`);
   if (ev.empresaPaga) empresas.push(`Paga: ${ev.empresaPaga}`);
   if (empresas.length) lineas.push(empresas.join(" / "));
-  lineas.push(`Estado: ${estadoTexto(ev)}`);
   if (ev.cronograma?.length) {
     lineas.push("Cronograma:");
     ev.cronograma.slice().sort((a, b) => (a.hora || "").localeCompare(b.hora || "")).forEach(c => {
@@ -129,6 +142,8 @@ function textoEvento(ev) {
     });
   }
   if (ev.notas) lineas.push(`Notas: ${ev.notas}`);
+  lineas.push("");
+  lineas.push(`Estado de pago: ${estadoTexto(ev)}`);
   return lineas.join("\n");
 }
 
@@ -212,14 +227,18 @@ function blankEvent(fecha) {
   return {
     id: uid(), fecha: fecha || toISO(new Date()), salon: "", salonOtro: "",
     horaInicio: "09:00", horaFin: "13:00", horaArmado: "", horaDesarme: "",
-    personas: "", servicio: "", incluye: [],
+    nombreEvento: "",
+    personas: "", servicio: "", incluye: [], tecnica: [],
+    formatoArmado: "",
+    colorEvento: "",
     tarifaTipo: "completa",
-    catering: false, coffeeBreak: false, armadoFuera: false,
     empresaOrganiza: "", empresaContrata: "", empresaPaga: "",
     estadoPago: "pendiente", monto: "", adelanto: "", comprobanteTexto: "", comprobanteLink: "",
+    precioPorPersona: "",
     vale: { numero: "", tipo: "Coffee break", cantidad: "", precioUnitario: "", concepto: "" },
     comanda: { cubiertos: "", detalle: "" },
     cronograma: [],
+    planoDibujo: "",
     notificarJefeAreas: false,
     notas: "",
   };
@@ -375,12 +394,16 @@ function MonthView({ year, month, events, onPrev, onNext, onDayClick }) {
                   }}>
                   <div style={{ fontFamily: FONT_MONO, fontSize: 11, color: INK }}>{d.getDate()}</div>
                   <div className="flex flex-col gap-0.5 mt-1">
-                    {evs.slice(0, 2).map(e => (
-                      <div key={e.id} className="truncate rounded px-1" style={{ fontSize: 10, background: e.estadoPago === "pagado" ? PAGADO_BG : e.estadoPago === "cp" ? CP_BG : e.estadoPago === "parcial" ? PARCIAL_BG : PENDIENTE_BG, color: e.estadoPago === "pagado" ? PAGADO : e.estadoPago === "cp" ? CP_COLOR : e.estadoPago === "parcial" ? PARCIAL : PENDIENTE, fontFamily: FONT_BODY }}>
-                        {e.salon || "Evento"}
-                      </div>
-                    ))}
-                    {evs.length > 2 && <div style={{ fontSize: 10, color: MUTED }}>+{evs.length - 2} más</div>}
+                    {evs.slice(0, 3).map(e => {
+                      const bg = e.colorEvento || (e.estadoPago === "pagado" ? PAGADO_BG : e.estadoPago === "cp" ? CP_BG : e.estadoPago === "parcial" ? PARCIAL_BG : PENDIENTE_BG);
+                      const fg = e.colorEvento ? "#fff" : (e.estadoPago === "pagado" ? PAGADO : e.estadoPago === "cp" ? CP_COLOR : e.estadoPago === "parcial" ? PARCIAL : PENDIENTE);
+                      return (
+                        <div key={e.id} className="truncate rounded px-1" style={{ fontSize: 10, background: bg, color: fg, fontFamily: FONT_BODY }}>
+                          {e.nombreEvento || e.salon || "Evento"}
+                        </div>
+                      );
+                    })}
+                    {evs.length > 3 && <div style={{ fontSize: 10, color: MUTED }}>+{evs.length - 3} más</div>}
                   </div>
                 </button>
               );
@@ -464,12 +487,14 @@ function Toggle({ checked, onChange, label }) {
    FORMULARIO DE EVENTO
    ============================================================ */
 function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
-  const [ev, setEv] = useState(() => initial || blankEvent());
+  const [ev, setEv] = useState(() => ({ ...blankEvent(initial?.fecha), ...(initial || {}) }));
   const set = (k, v) => setEv(prev => ({ ...prev, [k]: v }));
   const setVale = (k, v) => setEv(prev => ({ ...prev, vale: { ...prev.vale, [k]: v } }));
   const setComanda = (k, v) => setEv(prev => ({ ...prev, comanda: { ...prev.comanda, [k]: v } }));
   const toggleIncluye = (item) => setEv(prev => ({ ...prev, incluye: prev.incluye.includes(item) ? prev.incluye.filter(i => i !== item) : [...prev.incluye, item] }));
   const [nuevoIncluye, setNuevoIncluye] = useState("");
+  const toggleTecnica = (item) => setEv(prev => ({ ...prev, tecnica: (prev.tecnica || []).includes(item) ? prev.tecnica.filter(i => i !== item) : [...(prev.tecnica || []), item] }));
+  const [nuevaTecnica, setNuevaTecnica] = useState("");
 
   const [nuevaHora, setNuevaHora] = useState("");
   const [nuevoDetalle, setNuevoDetalle] = useState("");
@@ -491,8 +516,12 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
     <div className="p-5 rounded" style={{ background: CARD, border: `1px solid ${LINE}` }}>
       <h3 style={{ fontFamily: FONT_HEAD, fontSize: 20, color: INK, marginBottom: 16 }}>{initial ? "Editar ficha de evento" : "Nueva ficha de evento"}</h3>
 
+      <Field label="Nombre de evento">
+        <input style={inputStyle} value={ev.nombreEvento || ""} onChange={e => set("nombreEvento", e.target.value)} placeholder="Ej: Cena aniversario Camuzzi Gas" />
+      </Field>
+
       <div className="grid grid-cols-2 gap-x-4">
-        <Field label="Fecha"><input type="date" style={inputStyle} value={ev.fecha} onChange={e => set("fecha", e.target.value)} /></Field>
+        <Field label="Fecha"><input type="date" style={{ ...inputStyle, colorScheme: "light" }} value={ev.fecha} onChange={e => set("fecha", e.target.value)} /></Field>
         <Field label="Salón">
           <select style={inputStyle} value={ev.salon} onChange={e => set("salon", e.target.value)}>
             <option value="">Elegir salón…</option>
@@ -501,13 +530,30 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
           </select>
           {ev.salon === "Otro" && <input style={{ ...inputStyle, marginTop: 8 }} placeholder="Nombre del salón" value={ev.salonOtro} onChange={e => set("salonOtro", e.target.value)} />}
         </Field>
-        <Field label="Hora inicio"><input type="time" style={inputStyle} value={ev.horaInicio} onChange={e => set("horaInicio", e.target.value)} /></Field>
-        <Field label="Hora fin"><input type="time" style={inputStyle} value={ev.horaFin} onChange={e => set("horaFin", e.target.value)} /></Field>
-        <Field label="Hora de armado (opcional)"><input type="time" style={inputStyle} value={ev.horaArmado || ""} onChange={e => set("horaArmado", e.target.value)} /></Field>
-        <Field label="Hora de desarme (opcional)"><input type="time" style={inputStyle} value={ev.horaDesarme || ""} onChange={e => set("horaDesarme", e.target.value)} /></Field>
+        <Field label="Hora inicio (24hs)"><input type="time" step="60" lang="es-AR" style={inputStyle} value={ev.horaInicio} onChange={e => set("horaInicio", e.target.value)} /></Field>
+        <Field label="Hora fin (24hs)"><input type="time" step="60" lang="es-AR" style={inputStyle} value={ev.horaFin} onChange={e => set("horaFin", e.target.value)} /></Field>
+        <Field label="Hora de armado (opcional, 24hs)"><input type="time" step="60" lang="es-AR" style={inputStyle} value={ev.horaArmado || ""} onChange={e => set("horaArmado", e.target.value)} /></Field>
+        <Field label="Hora de desarme (opcional, 24hs)"><input type="time" step="60" lang="es-AR" style={inputStyle} value={ev.horaDesarme || ""} onChange={e => set("horaDesarme", e.target.value)} /></Field>
         <Field label="Personas"><input type="number" style={inputStyle} value={ev.personas} onChange={e => set("personas", e.target.value)} /></Field>
-        <Field label="Servicio"><input style={inputStyle} value={ev.servicio} onChange={e => set("servicio", e.target.value)} placeholder="Finger food, almuerzo, coffee break..." /></Field>
+        <Field label="Concepto"><input style={inputStyle} value={ev.servicio} onChange={e => set("servicio", e.target.value)} placeholder="Ej: cena" /></Field>
       </div>
+
+      <Field label="Color en el calendario">
+        <div className="flex gap-2 flex-wrap">
+          {COLORES_EVENTO.map(c => (
+            <button type="button" key={c.valor} onClick={() => set("colorEvento", c.valor)}
+              title={c.nombre}
+              style={{
+                width: 28, height: 28, borderRadius: "50%", background: c.valor,
+                border: ev.colorEvento === c.valor ? `3px solid ${INK}` : `1px solid ${LINE}`,
+              }} />
+          ))}
+          <button type="button" onClick={() => set("colorEvento", "")}
+            className="text-xs px-2.5 py-1 rounded-full" style={{ border: `1px solid ${LINE}`, color: MUTED, fontFamily: FONT_BODY }}>
+            Sin color (usar estado de pago)
+          </button>
+        </div>
+      </Field>
 
       <Field label="Tarifa del salón">
         <div className="flex gap-3 items-center">
@@ -521,31 +567,46 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
         </div>
       </Field>
 
-      <Field label="Checklist del evento">
-        <div className="grid grid-cols-3 gap-2">
-          <Toggle checked={ev.catering} onChange={v => set("catering", v)} label="Catering / Comida" />
-          <Toggle checked={ev.coffeeBreak} onChange={v => set("coffeeBreak", v)} label="Coffee break" />
-          <Toggle checked={ev.armadoFuera} onChange={v => set("armadoFuera", v)} label="Armado fuera del salón" />
-        </div>
-      </Field>
-
-      <Field label="Incluye">
+      <Field label="Incluye (catering / comida)">
         <div className="flex flex-wrap gap-2 mb-2">
-          {INCLUYE_SUGERIDOS.map(item => (
+          {CATERING_SUGERIDOS.map(item => (
             <button type="button" key={item} onClick={() => toggleIncluye(item)}
               className="text-xs px-2.5 py-1 rounded-full"
               style={{ border: `1px solid ${ev.incluye.includes(item) ? ACCENT : LINE}`, background: ev.incluye.includes(item) ? ACCENT : "transparent", color: ev.incluye.includes(item) ? "#fff" : INK, fontFamily: FONT_BODY }}>
               {item}
             </button>
           ))}
-          {ev.incluye.filter(i => !INCLUYE_SUGERIDOS.includes(i)).map(item => (
+          {ev.incluye.filter(i => !CATERING_SUGERIDOS.includes(i)).map(item => (
             <button type="button" key={item} onClick={() => toggleIncluye(item)} className="text-xs px-2.5 py-1 rounded-full" style={{ border: `1px solid ${ACCENT}`, background: ACCENT, color: "#fff", fontFamily: FONT_BODY }}>{item} ✕</button>
           ))}
         </div>
         <div className="flex gap-2">
-          <input style={inputStyle} value={nuevoIncluye} onChange={e => setNuevoIncluye(e.target.value)} placeholder="Agregar otro ítem..." />
+          <input style={inputStyle} value={nuevoIncluye} onChange={e => setNuevoIncluye(e.target.value)} placeholder="Agregar otro ítem de comida..." />
           <button type="button" onClick={() => { if (nuevoIncluye.trim()) { toggleIncluye(nuevoIncluye.trim()); setNuevoIncluye(""); } }} className="px-3 rounded text-sm" style={{ background: INK_SOFT, color: PAPER }}>+</button>
         </div>
+      </Field>
+
+      <Field label="Técnica (servicios adicionales)">
+        <div className="flex flex-wrap gap-2 mb-2">
+          {TECNICA_SUGERIDOS.map(item => (
+            <button type="button" key={item} onClick={() => toggleTecnica(item)}
+              className="text-xs px-2.5 py-1 rounded-full"
+              style={{ border: `1px solid ${ev.tecnica.includes(item) ? ACCENT : LINE}`, background: ev.tecnica.includes(item) ? ACCENT : "transparent", color: ev.tecnica.includes(item) ? "#fff" : INK, fontFamily: FONT_BODY }}>
+              {item}
+            </button>
+          ))}
+          {ev.tecnica.filter(i => !TECNICA_SUGERIDOS.includes(i)).map(item => (
+            <button type="button" key={item} onClick={() => toggleTecnica(item)} className="text-xs px-2.5 py-1 rounded-full" style={{ border: `1px solid ${ACCENT}`, background: ACCENT, color: "#fff", fontFamily: FONT_BODY }}>{item} ✕</button>
+          ))}
+        </div>
+        <div className="flex gap-2">
+          <input style={inputStyle} value={nuevaTecnica} onChange={e => setNuevaTecnica(e.target.value)} placeholder="Agregar otro ítem técnico..." />
+          <button type="button" onClick={() => { if (nuevaTecnica.trim()) { toggleTecnica(nuevaTecnica.trim()); setNuevaTecnica(""); } }} className="px-3 rounded text-sm" style={{ background: INK_SOFT, color: PAPER }}>+</button>
+        </div>
+      </Field>
+
+      <Field label="Formato / armado del salón">
+        <textarea style={{ ...inputStyle, minHeight: 60 }} value={ev.formatoArmado || ""} onChange={e => set("formatoArmado", e.target.value)} placeholder="Describí cómo armar el salón: en U, escuela, banquete, cantidad de mesas, etc." />
       </Field>
 
       <div className="grid grid-cols-3 gap-x-4">
@@ -565,10 +626,23 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
           ))}
         </div>
         <div className="grid grid-cols-3 gap-x-4">
-          <Field label={ev.estadoPago === "parcial" ? "Monto total del evento" : "Monto"}><input style={inputStyle} value={ev.monto} onChange={e => set("monto", e.target.value)} placeholder="$ ..." /></Field>
+          <Field label="Precio por persona (opcional)"><input type="number" style={inputStyle} value={ev.precioPorPersona || ""} onChange={e => set("precioPorPersona", e.target.value)} placeholder="$ ..." /></Field>
+          <Field label={ev.estadoPago === "parcial" ? "Monto total del evento (con IVA)" : "Monto (con IVA)"}><input style={inputStyle} value={ev.monto} onChange={e => set("monto", e.target.value)} placeholder="$ ..." /></Field>
           <Field label="N° de comprobante"><input style={inputStyle} value={ev.comprobanteTexto} onChange={e => set("comprobanteTexto", e.target.value)} placeholder="Factura N°..." /></Field>
+        </div>
+        <div className="grid grid-cols-3 gap-x-4">
           <Field label="Link a comprobante"><input style={inputStyle} value={ev.comprobanteLink} onChange={e => set("comprobanteLink", e.target.value)} placeholder="Link a Drive/Dropbox" /></Field>
         </div>
+        {(ev.precioPorPersona || ev.monto) && (() => {
+          const totalConIva = ev.precioPorPersona && ev.personas ? Number(ev.precioPorPersona) * Number(ev.personas) : Number(ev.monto) || 0;
+          const sinIva = totalConIva / 1.21;
+          const iva = totalConIva - sinIva;
+          return (
+            <p style={{ fontFamily: FONT_MONO, fontSize: 12.5, color: MUTED, marginTop: -6, marginBottom: 10 }}>
+              Total c/IVA $ {totalConIva.toFixed(2)} · Sin IVA $ {sinIva.toFixed(2)} · IVA 21% $ {iva.toFixed(2)}
+            </p>
+          );
+        })()}
 
         {ev.estadoPago === "parcial" && (
           <div className="mt-3 p-3 rounded" style={{ background: PARCIAL_BG, border: `1px solid ${PARCIAL}` }}>
@@ -630,7 +704,7 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
           {!cronoOrdenado.length && <p style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: MUTED }}>Sin ítems todavía. Ej: 18:00 prueba de sonido, 20:30 llegada de invitados, 21:30 coffee break, 22:00 charla, 23:00 finger food, 23:40 postre.</p>}
         </div>
         <div className="flex gap-2">
-          <input type="time" style={{ ...inputStyle, maxWidth: 110 }} value={nuevaHora} onChange={e => setNuevaHora(e.target.value)} />
+          <input type="time" lang="es-AR" style={{ ...inputStyle, maxWidth: 110 }} value={nuevaHora} onChange={e => setNuevaHora(e.target.value)} />
           <input style={inputStyle} value={nuevoDetalle} onChange={e => setNuevoDetalle(e.target.value)} placeholder="Qué pasa a esa hora..." />
           <button type="button" onClick={agregarCronograma} className="px-3 rounded text-sm" style={{ background: INK_SOFT, color: PAPER }}>+</button>
         </div>
@@ -654,21 +728,22 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
 /* ============================================================
    FICHA (detalle)
    ============================================================ */
-function EventDetail({ ev, jefeAreas, isAdmin, onEdit, onVaucher, onCronograma, onPlano, onVale, onComanda, tienePlano }) {
+function EventDetail({ ev, jefeAreas, isAdmin, onEdit, onVaucher, onCronograma, onPlano, onVale, onComanda, tienePlantilla }) {
   return (
     <div className="p-5 rounded" style={{ background: CARD, border: `1px solid ${LINE}` }}>
       <div className="flex items-start justify-between mb-3">
         <div>
-          <h3 style={{ fontFamily: FONT_HEAD, fontSize: 22, color: INK }}>{ev.salon || "Sin salón"}</h3>
-          <p style={{ fontFamily: FONT_BODY, fontSize: 13, color: MUTED }}>{fmtFecha(ev.fecha)} · {ev.horaInicio}–{ev.horaFin} · {ev.personas || "?"} personas</p>
+          {ev.colorEvento && <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: "50%", background: ev.colorEvento, marginRight: 6 }} />}
+          <h3 style={{ fontFamily: FONT_HEAD, fontSize: 22, color: INK, display: "inline" }}>{ev.nombreEvento || ev.salon || "Sin nombre"}</h3>
+          <p style={{ fontFamily: FONT_BODY, fontSize: 13, color: MUTED }}>{ev.salon || "Sin salón"} · {fmtFecha(ev.fecha)} · {ev.horaInicio}–{ev.horaFin} · {ev.personas || "?"} personas</p>
         </div>
         <Stamp estadoPago={ev.estadoPago} />
       </div>
 
-      {ev.servicio && <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}><b>Servicio:</b> {ev.servicio}</p>}
-      <p style={{ fontFamily: FONT_BODY, fontSize: 13, color: MUTED, marginBottom: 6 }}>{checklistTexto(ev)}</p>
+      {ev.servicio && <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}><b>Concepto:</b> {ev.servicio}</p>}
+      {checklistTexto(ev) && <p style={{ fontFamily: FONT_BODY, fontSize: 13, color: MUTED, marginBottom: 6 }}>{checklistTexto(ev)}</p>}
       {ev.tarifaTipo && <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}><b>Tarifa:</b> {ev.tarifaTipo === "completa" ? "Completa" : "Media tarifa"}</p>}
-      {ev.incluye?.length > 0 && <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}><b>Incluye:</b> {ev.incluye.join(", ")}</p>}
+      {ev.formatoArmado && <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}><b>Formato de armado:</b> {ev.formatoArmado}</p>}
       <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}>
         <b>Organiza:</b> {ev.empresaOrganiza || "-"} · <b>Contrata:</b> {ev.empresaContrata || "-"} · <b>Paga:</b> {ev.empresaPaga || "-"}
       </p>
@@ -693,7 +768,7 @@ function EventDetail({ ev, jefeAreas, isAdmin, onEdit, onVaucher, onCronograma, 
         <button onClick={onComanda} className="px-3 py-1.5 rounded text-xs font-medium" style={{ border: `1px solid ${PAGADO}`, color: PAGADO, fontFamily: FONT_BODY }}>Ver / imprimir comanda</button>
         {ev.estadoPago === "cp" && <button onClick={onVale} className="px-3 py-1.5 rounded text-xs font-medium" style={{ background: CP_COLOR, color: "#fff", fontFamily: FONT_BODY }}>Ver / imprimir vale</button>}
         <button onClick={onPlano} className="px-3 py-1.5 rounded text-xs font-medium" style={{ border: `1px solid ${ACCENT}`, color: ACCENT, fontFamily: FONT_BODY }}>
-          {tienePlano ? "Ver plano del salón" : "Plano no cargado"}
+          {ev.planoDibujo ? "Ver / editar plano del evento" : tienePlantilla ? "Dibujar plano del evento" : "Plano no cargado"}
         </button>
       </div>
 
@@ -715,6 +790,15 @@ function EventDetail({ ev, jefeAreas, isAdmin, onEdit, onVaucher, onCronograma, 
    VAUCHER (imprimible)
    ============================================================ */
 function Voucher({ ev, onBack }) {
+  const personas = Number(ev.personas) || 0;
+  const totalConIva = ev.precioPorPersona && personas
+    ? Number(ev.precioPorPersona) * personas
+    : Number(ev.monto) || 0;
+  const sinIva = totalConIva / 1.21;
+  const iva = totalConIva - sinIva;
+  const pagado = ev.estadoPago === "pagado" ? totalConIva : (Number(ev.adelanto) || 0);
+  const saldo = totalConIva - pagado;
+
   return (
     <div>
       <div className="no-print flex gap-2 mb-4">
@@ -722,27 +806,39 @@ function Voucher({ ev, onBack }) {
         <button onClick={onBack} className="px-4 py-2 rounded text-sm font-medium" style={{ border: `1px solid ${LINE}`, color: INK, fontFamily: FONT_BODY }}>Volver</button>
       </div>
       <div className="p-8" style={{ background: CARD, border: `1px solid ${INK}`, maxWidth: 640, margin: "0 auto" }}>
-        <PrintHeader eyebrow="Orden de evento" titulo={ev.salon || "Salón a confirmar"} />
+        <PrintHeader eyebrow="Orden de evento" titulo={ev.nombreEvento || ev.salon || "Salón a confirmar"} />
         <div className="flex justify-end -mt-2 mb-3"><Stamp estadoPago={ev.estadoPago} /></div>
         <div className="grid grid-cols-2 gap-y-2 gap-x-6 mb-4" style={{ fontFamily: FONT_BODY, fontSize: 13.5, color: INK }}>
+          <p><b>Salón:</b> {ev.salon || "-"}</p>
           <p><b>Fecha:</b> {fmtFecha(ev.fecha)}</p>
           <p><b>Horario:</b> {ev.horaInicio} a {ev.horaFin}</p>
           <p><b>Personas:</b> {ev.personas || "-"}</p>
-          <p><b>Servicio:</b> {ev.servicio || "-"}</p>
+          <p><b>Concepto:</b> {ev.servicio || "-"}</p>
           <p><b>Tarifa:</b> {ev.tarifaTipo === "completa" ? "Completa" : "Media tarifa"}</p>
         </div>
-        <p style={{ fontFamily: FONT_BODY, fontSize: 13.5, color: MUTED, marginBottom: 10 }}>{checklistTexto(ev)}</p>
-        {ev.incluye?.length > 0 && <p style={{ fontFamily: FONT_BODY, fontSize: 13.5, color: INK, marginBottom: 10 }}><b>Incluye:</b> {ev.incluye.join(", ")}</p>}
+        {checklistTexto(ev) && <p style={{ fontFamily: FONT_BODY, fontSize: 13.5, color: MUTED, marginBottom: 10 }}>{checklistTexto(ev)}</p>}
+        {ev.formatoArmado && <p style={{ fontFamily: FONT_BODY, fontSize: 13.5, color: INK, marginBottom: 10 }}><b>Formato de armado:</b> {ev.formatoArmado}</p>}
         <div className="p-3 mb-4" style={{ background: HILITE_BG, fontFamily: FONT_BODY, fontSize: 13.5, color: INK }}>
           <p><b>Organiza:</b> {ev.empresaOrganiza || "-"}</p>
           <p><b>Contrata:</b> {ev.empresaContrata || "-"}</p>
           <p><b>Paga:</b> {ev.empresaPaga || "-"}</p>
         </div>
-        {(ev.monto || ev.comprobanteTexto) && (
-          <p style={{ fontFamily: FONT_BODY, fontSize: 13.5, color: INK, marginBottom: 10 }}>
-            <b>Pago:</b> {ev.monto || "-"} {ev.comprobanteTexto ? `· Comprobante ${ev.comprobanteTexto}` : ""}
-          </p>
-        )}
+
+        <div className="p-3 mb-4 rounded" style={{ background: PARCIAL_BG, border: `1px solid ${PARCIAL}`, fontFamily: FONT_BODY, fontSize: 13.5, color: INK }}>
+          <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: PARCIAL, marginBottom: 8, fontWeight: 600 }}>Detalle de facturación</p>
+          <p><b>Ítems de comida:</b> {ev.incluye?.length ? ev.incluye.join(", ") : "-"}</p>
+          <p><b>Precio por persona:</b> {ev.precioPorPersona ? `$ ${ev.precioPorPersona}` : "-"}</p>
+          <p><b>Cantidad de personas:</b> {ev.personas || "-"}</p>
+          <div style={{ height: 1, background: PARCIAL, opacity: 0.3, margin: "8px 0" }} />
+          <p><b>Valor sin IVA:</b> $ {sinIva.toFixed(2)}</p>
+          <p><b>IVA (21%):</b> $ {iva.toFixed(2)}</p>
+          <p style={{ fontWeight: 700 }}><b>Precio total (con IVA):</b> $ {totalConIva.toFixed(2)}</p>
+          <div style={{ height: 1, background: PARCIAL, opacity: 0.3, margin: "8px 0" }} />
+          <p><b>Pagado:</b> $ {pagado.toFixed(2)}</p>
+          <p><b>Saldo pendiente:</b> $ {saldo.toFixed(2)}</p>
+          {ev.comprobanteTexto && <p><b>Comprobante:</b> {ev.comprobanteTexto}</p>}
+        </div>
+
         {ev.notas && <p style={{ fontFamily: FONT_BODY, fontSize: 13.5, color: INK }}><b>Notas:</b> {ev.notas}</p>}
         <p className="mt-8" style={{ fontFamily: FONT_MONO, fontSize: 10.5, color: MUTED }}>Generado el {new Date().toLocaleDateString("es-AR")}</p>
       </div>
@@ -1025,22 +1121,119 @@ function ImportICS({ onImport }) {
 }
 
 /* ============================================================
-   PLANO DEL SALÓN (imprimible)
+   PLANO DEL SALÓN — dibujo a mano por evento (imprimible)
+   La plantilla vacía se sube por salón en Ajustes. Acá se dibuja
+   encima, específico para este evento; la plantilla original
+   nunca se modifica.
    ============================================================ */
-function Plano({ salon, imagen, onBack }) {
+function PlanoEditor({ salon, plantilla, dibujoInicial, onGuardar, onBack }) {
+  const canvasRef = useRef(null);
+  const [color, setColor] = useState("#96453A");
+  const [grosor, setGrosor] = useState(3);
+  const dibujandoRef = useRef(false);
+  const [guardado, setGuardado] = useState(false);
+
+  const cargarBase = (src) => {
+    const canvas = canvasRef.current;
+    if (!canvas || !src) return;
+    const ctx = canvas.getContext("2d");
+    const img = new Image();
+    img.onload = () => {
+      canvas.width = img.width;
+      canvas.height = img.height;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0);
+    };
+    img.src = src;
+  };
+
+  useEffect(() => { cargarBase(dibujoInicial || plantilla); }, [plantilla, dibujoInicial]);
+
+  const getPos = (e) => {
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    return { x: (clientX - rect.left) * scaleX, y: (clientY - rect.top) * scaleY };
+  };
+
+  const startDraw = (e) => {
+    e.preventDefault();
+    dibujandoRef.current = true;
+    const ctx = canvasRef.current.getContext("2d");
+    const { x, y } = getPos(e);
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+  };
+  const draw = (e) => {
+    if (!dibujandoRef.current) return;
+    e.preventDefault();
+    const ctx = canvasRef.current.getContext("2d");
+    const { x, y } = getPos(e);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = grosor;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.lineTo(x, y);
+    ctx.stroke();
+  };
+  const endDraw = () => { dibujandoRef.current = false; };
+
+  const borrarDibujo = () => cargarBase(plantilla);
+
+  const guardar = () => {
+    const dataUrl = canvasRef.current.toDataURL("image/png");
+    onGuardar(dataUrl);
+    setGuardado(true);
+    setTimeout(() => setGuardado(false), 1500);
+  };
+
+  if (!plantilla) {
+    return (
+      <div>
+        <div className="no-print flex gap-2 mb-4">
+          <button onClick={onBack} className="px-4 py-2 rounded text-sm font-medium" style={{ border: `1px solid ${LINE}`, color: INK, fontFamily: FONT_BODY }}>Volver</button>
+        </div>
+        <p style={{ fontFamily: FONT_BODY, fontSize: 13, color: MUTED }}>
+          Todavía no se cargó una plantilla de plano vacío para "{salon}". Subila desde <b>Ajustes → Planos de salones</b> y después vas a poder dibujar acá para cada evento.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div>
-      <div className="no-print flex gap-2 mb-4">
-        {imagen && <button onClick={() => window.print()} className="px-4 py-2 rounded text-sm font-medium" style={{ background: INK_SOFT, color: PAPER, fontFamily: FONT_BODY }}>Imprimir plano</button>}
-        <button onClick={onBack} className="px-4 py-2 rounded text-sm font-medium" style={{ border: `1px solid ${LINE}`, color: INK, fontFamily: FONT_BODY }}>Volver</button>
+      <div className="no-print flex gap-2 mb-4 flex-wrap items-center">
+        <button onClick={() => window.print()} className="px-4 py-2 rounded text-sm font-medium" style={{ background: INK_SOFT, color: PAPER, fontFamily: FONT_BODY }}>Imprimir plano</button>
+        <button onClick={guardar} className="px-4 py-2 rounded text-sm font-medium" style={{ background: PAGADO, color: PAPER, fontFamily: FONT_BODY }}>{guardado ? "¡Guardado!" : "Guardar dibujo del evento"}</button>
+        <button onClick={borrarDibujo} className="px-3 py-2 rounded text-xs font-medium" style={{ border: `1px solid ${PENDIENTE}`, color: PENDIENTE, fontFamily: FONT_BODY }}>Borrar y volver a la plantilla</button>
+        <div className="flex items-center gap-1.5 px-2">
+          <span style={{ fontFamily: FONT_BODY, fontSize: 12, color: MUTED }}>Color:</span>
+          {["#96453A", "#4A6FA5", "#5C7A5E", "#2C1F1B"].map(c => (
+            <button key={c} onClick={() => setColor(c)} style={{ width: 20, height: 20, borderRadius: "50%", background: c, border: color === c ? `2px solid ${INK}` : `1px solid ${LINE}` }} />
+          ))}
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span style={{ fontFamily: FONT_BODY, fontSize: 12, color: MUTED }}>Grosor:</span>
+          {[2, 4, 7].map(g => (
+            <button key={g} onClick={() => setGrosor(g)} className="text-xs px-2 py-1 rounded" style={{ border: `1px solid ${grosor === g ? ACCENT : LINE}`, background: grosor === g ? ACCENT : "transparent", color: grosor === g ? "#fff" : INK }}>{g}</button>
+          ))}
+        </div>
+        <button onClick={onBack} className="px-4 py-2 rounded text-sm font-medium ml-auto" style={{ border: `1px solid ${LINE}`, color: INK, fontFamily: FONT_BODY }}>Volver</button>
       </div>
       <div className="p-6" style={{ background: CARD, border: `1px solid ${INK}`, maxWidth: 640, margin: "0 auto" }}>
         <PrintHeader eyebrow="Plano de armado" titulo={salon || "Salón"} />
-        {imagen ? (
-          <img src={imagen} alt={`Plano de ${salon}`} style={{ width: "100%", borderRadius: 4, border: `1px solid ${LINE}` }} />
-        ) : (
-          <p style={{ fontFamily: FONT_BODY, fontSize: 13, color: MUTED }}>Todavía no se cargó un plano para este salón. La organizadora puede subirlo desde "Ajustes".</p>
-        )}
+        <canvas
+          ref={canvasRef}
+          onMouseDown={startDraw} onMouseMove={draw} onMouseUp={endDraw} onMouseLeave={endDraw}
+          onTouchStart={startDraw} onTouchMove={draw} onTouchEnd={endDraw}
+          style={{ width: "100%", borderRadius: 4, border: `1px solid ${LINE}`, touchAction: "none", cursor: "crosshair" }}
+        />
+        <p className="no-print" style={{ fontFamily: FONT_BODY, fontSize: 12, color: MUTED, marginTop: 8 }}>
+          Dibujá directamente sobre el plano con el dedo o el mouse para armar la disposición de este evento en particular. La plantilla original del salón (en Ajustes) no se modifica.
+        </p>
       </div>
     </div>
   );
@@ -1223,8 +1416,8 @@ function Settings({ jefeAreas, setJefeAreas, tarifas, setTarifas, floorplans, se
       </div>
 
       <div className="p-5 rounded" style={{ background: CARD, border: `1px solid ${LINE}` }}>
-        <h3 style={{ fontFamily: FONT_HEAD, fontSize: 20, color: INK, marginBottom: 12 }}>Planos de salones</h3>
-        <p style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: MUTED, marginBottom: 16 }}>Subí una foto o imagen del plano de cada salón. Va a quedar disponible para imprimir desde la ficha de cada evento (el nombre debe coincidir con el que elegís en "Salón").</p>
+        <h3 style={{ fontFamily: FONT_HEAD, fontSize: 20, color: INK, marginBottom: 12 }}>Planos de salones (plantilla vacía)</h3>
+        <p style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: MUTED, marginBottom: 16 }}>Subí acá el plano vacío (plantilla) de cada salón, sin marcar nada. Después, desde cada evento vas a poder abrir ese plano y dibujar/anotar a mano la disposición específica de ese evento, sin modificar esta plantilla (el nombre del salón debe coincidir con el que elegís en "Salón").</p>
 
         <div className="flex flex-col gap-3 mb-4">
           {Object.entries(floorplans).map(([salon, img]) => (
@@ -1319,6 +1512,10 @@ export default function App() {
     setEvents(prev => prev.filter(e => e.id !== id));
     setSelectedEvent(null); setEditingEvent(null); setView("calendario");
   };
+  const handleSavePlano = (dataUrl) => {
+    setEvents(prev => prev.map(e => e.id === selectedEvent.id ? { ...e, planoDibujo: dataUrl } : e));
+    setSelectedEvent(prev => ({ ...prev, planoDibujo: dataUrl }));
+  };
 
   if (!ready) {
     return <div style={{ minHeight: "100vh", background: PAPER, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: FONT_BODY, color: MUTED }}>Cargando planner…</div>;
@@ -1391,7 +1588,7 @@ export default function App() {
             onPlano={() => setView("plano")}
             onVale={() => setView("vale")}
             onComanda={() => setView("comanda")}
-            tienePlano={!!floorplans[selectedEvent.salon]}
+            tienePlantilla={!!floorplans[selectedEvent.salon]}
           />
         )}
 
@@ -1399,7 +1596,15 @@ export default function App() {
         {view === "vale" && selectedEvent && <Vale ev={selectedEvent} onBack={() => setView("ficha")} />}
         {view === "comanda" && selectedEvent && <Comanda ev={selectedEvent} onBack={() => setView("ficha")} />}
         {view === "cronograma" && selectedEvent && <Cronograma ev={selectedEvent} onBack={() => setView("ficha")} />}
-        {view === "plano" && selectedEvent && <Plano salon={selectedEvent.salon} imagen={floorplans[selectedEvent.salon]} onBack={() => setView("ficha")} />}
+        {view === "plano" && selectedEvent && (
+          <PlanoEditor
+            salon={selectedEvent.salon}
+            plantilla={floorplans[selectedEvent.salon]}
+            dibujoInicial={selectedEvent.planoDibujo}
+            onGuardar={handleSavePlano}
+            onBack={() => setView("ficha")}
+          />
+        )}
 
         {view === "importar" && isAdmin && (
           <ImportICS onImport={(nuevos) => setEvents(prev => [...prev, ...nuevos])} />

@@ -1176,6 +1176,46 @@ function EventDetail({ ev, jefeAreas, isAdmin, onEdit, onVaucher, onCronograma, 
           </ul>
         </div>
       )}
+
+      {/* ---- Cotización / valor total del evento: salón automático + ítems cargados a mano ---- */}
+      {(() => {
+        const { filas, sinIva, iva, totalConIva } = totalItemsEvento(ev);
+        return (
+          <div className="p-3 rounded mb-4" style={{ background: HILITE_BG, border: `1px solid ${LINE}` }}>
+            <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: MUTED, marginBottom: 10, fontWeight: 600 }}>Cotización del evento — valor total</p>
+            {filas.length > 0 ? (
+              <table className="w-full mb-2" style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: INK, borderCollapse: "collapse" }}>
+                <thead>
+                  <tr style={{ borderBottom: `1px solid ${LINE}` }}>
+                    <th className="text-left py-1">Detalle</th>
+                    <th className="text-right py-1">Cant.</th>
+                    <th className="text-right py-1">Valor uni.</th>
+                    <th className="text-right py-1">Valor total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filas.map(f => (
+                    <tr key={f.id} style={{ borderBottom: `1px solid ${LINE}`, opacity: f.auto ? 0.85 : 1 }}>
+                      <td className="py-1">{f.detalle}{f.auto ? " — automático" : ""}</td>
+                      <td className="text-right py-1">{f.cantidad}</td>
+                      <td className="text-right py-1">$ {Number(f.valorUnitario).toFixed(2)}</td>
+                      <td className="text-right py-1">$ {(Number(f.cantidad) * Number(f.valorUnitario)).toFixed(2)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <p style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: MUTED, marginBottom: 8 }}>Sin ítems cargados.</p>
+            )}
+            <div style={{ borderTop: `1px solid ${LINE}`, paddingTop: 6, fontFamily: FONT_MONO, fontSize: 12.5, color: INK }}>
+              <div className="flex justify-between"><span>Subtotal (sin IVA)</span><span>$ {sinIva.toFixed(2)}</span></div>
+              <div className="flex justify-between"><span>IVA (21%)</span><span>$ {iva.toFixed(2)}</span></div>
+              <div className="flex justify-between" style={{ fontWeight: 700, fontSize: 14 }}><span>TOTAL (con IVA incluido)</span><span>$ {totalConIva.toFixed(2)}</span></div>
+            </div>
+          </div>
+        );
+      })()}
+
       {(ev.estadoPago === "parcial" || ev.estadoPago === "sena") && (() => {
         const { totalConIva } = totalItemsEvento(ev);
         return (
@@ -1185,7 +1225,76 @@ function EventDetail({ ev, jefeAreas, isAdmin, onEdit, onVaucher, onCronograma, 
           </p>
         );
       })()}
-      {ev.comanda?.cubiertos && <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}><b>Comanda:</b> {ev.comanda.cubiertos} cubiertos {ev.comanda.caterer ? `· Catering: ${ev.comanda.caterer}` : ""}</p>}
+
+      {/* ---- Vale (Administración): salones y cubiertos vendidos, discriminados por tipo ---- */}
+      {(ev.vale?.numero || (ev.vale?.tipos || []).length > 0) && (
+        <div className="p-3 rounded mb-4" style={{ background: CP_BG, border: `1px solid ${CP_COLOR}` }}>
+          <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: CP_COLOR, marginBottom: 8, fontWeight: 600 }}>Vale (Administración)</p>
+          <p style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK, marginBottom: 8 }}>
+            <b>N° de vale:</b> {ev.vale.numero || "-"} · <b>Salones vendidos:</b> {ev.vale.salonesVendidos || "1"}
+          </p>
+          {(ev.vale.tipos || []).length > 0 && (
+            <table className="w-full" style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: INK, borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ borderBottom: `1px solid ${CP_COLOR}` }}>
+                  <th className="text-left py-1">Tipo de cubierto</th>
+                  <th className="text-right py-1">Cant.</th>
+                  <th className="text-right py-1">Valor uni.</th>
+                  <th className="text-right py-1">Valor total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ev.vale.tipos.map(t => (
+                  <tr key={t.id} style={{ borderBottom: `1px solid ${LINE}` }}>
+                    <td className="py-1">{t.tipo}</td>
+                    <td className="text-right py-1">{t.cantidad}</td>
+                    <td className="text-right py-1">$ {Number(t.valorUnitario).toFixed(2)}</td>
+                    <td className="text-right py-1">$ {(Number(t.cantidad) * Number(t.valorUnitario)).toFixed(2)}</td>
+                  </tr>
+                ))}
+                <tr style={{ fontWeight: 700 }}>
+                  <td className="py-1">TOTAL cubiertos vendidos</td>
+                  <td className="text-right py-1">{ev.vale.tipos.reduce((s, t) => s + (Number(t.cantidad) || 0), 0)}</td>
+                  <td></td>
+                  <td className="text-right py-1">$ {ev.vale.tipos.reduce((s, t) => s + (Number(t.cantidad) || 0) * (Number(t.valorUnitario) || 0), 0).toFixed(2)}</td>
+                </tr>
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
+      {/* ---- Comanda (Cocina): cubiertos, catering, ítems a preparar ---- */}
+      {(ev.comanda?.cubiertos || ev.comanda?.caterer || (ev.comanda?.items || []).length > 0 || ev.comanda?.detalle) && (
+        <div className="p-3 rounded mb-4" style={{ background: HILITE_BG, border: `1px solid ${LINE}` }}>
+          <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: MUTED, marginBottom: 8, fontWeight: 600 }}>Comanda (Cocina)</p>
+          <p style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK, marginBottom: 8 }}>
+            <b>Cubiertos a preparar:</b> {ev.comanda.cubiertos || "-"} {ev.comanda.caterer ? <>· <b>Catering:</b> {ev.comanda.caterer}</> : ""}
+          </p>
+          {(ev.comanda.items || []).length > 0 && (
+            <table className="w-full mb-2" style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: INK, borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ borderBottom: `1px solid ${LINE}` }}>
+                  <th className="text-left py-1">Ítem</th>
+                  <th className="text-left py-1">Detalle</th>
+                  <th className="text-right py-1">Cant.</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ev.comanda.items.map(it => (
+                  <tr key={it.id} style={{ borderBottom: `1px solid ${LINE}` }}>
+                    <td className="py-1">{it.nombre}</td>
+                    <td className="py-1">{it.detalle}</td>
+                    <td className="text-right py-1">{it.cantidad}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          {ev.comanda.detalle && <p style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK }}><b>Notas para cocina:</b> {ev.comanda.detalle}</p>}
+        </div>
+      )}
+
       {ev.notas && <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}><b>Notas:</b> {ev.notas}</p>}
       {ev.controlInterno && <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}><b>Control interno:</b> {ev.controlInterno}</p>}
 
@@ -1831,19 +1940,22 @@ function Stats({ events }) {
 
   const totalEventos = delMes.length;
 
-  // Cubiertos vendidos y su desglose (coffee break vs. comidas) salen del Vale de cada evento,
-  // que es el documento pensado para reconciliar contra la factura.
-  const { totalCubiertos, coffeeBreak, comidas } = useMemo(() => {
-    let totalCubiertos = 0, coffeeBreak = 0, comidas = 0;
+  // Cubiertos vendidos y su desglose, discriminados por cada tipo de VALE_TIPOS
+  // (coffee break, almuerzo, cena, desayuno, brindis, finger food, otro), salen
+  // del Vale de cada evento, que es el documento pensado para reconciliar contra la factura.
+  const { totalCubiertos, porTipo } = useMemo(() => {
+    let totalCubiertos = 0;
+    const porTipo = {};
+    VALE_TIPOS.forEach(t => { porTipo[t] = 0; });
     delMes.forEach(e => {
       (e.vale?.tipos || []).forEach(t => {
         const cant = Number(t.cantidad) || 0;
         totalCubiertos += cant;
-        if (t.tipo === "Coffee break") coffeeBreak += cant;
-        else comidas += cant;
+        if (t.tipo in porTipo) porTipo[t.tipo] += cant;
+        else porTipo["Otro"] += cant;
       });
     });
-    return { totalCubiertos, coffeeBreak, comidas };
+    return { totalCubiertos, porTipo };
   }, [delMes]);
 
   // Cantidad de salones vendidos por mes, para cada uno de los 5 salones fijos del hotel.
@@ -1882,15 +1994,14 @@ function Stats({ events }) {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-4 mb-6">
-          <div className="p-4 rounded text-center" style={{ background: CP_BG }}>
-            <p style={{ fontFamily: FONT_HEAD, fontSize: 26, color: CP_COLOR }}>{coffeeBreak}</p>
-            <p style={{ fontFamily: FONT_BODY, fontSize: 11.5, color: MUTED, textTransform: "uppercase", letterSpacing: "0.06em" }}>Coffee break</p>
-          </div>
-          <div className="p-4 rounded text-center" style={{ background: PAGADO_BG }}>
-            <p style={{ fontFamily: FONT_HEAD, fontSize: 26, color: PAGADO }}>{comidas}</p>
-            <p style={{ fontFamily: FONT_BODY, fontSize: 11.5, color: MUTED, textTransform: "uppercase", letterSpacing: "0.06em" }}>Comidas (resto de tipos)</p>
-          </div>
+        <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: MUTED, marginBottom: 10 }}>Cubiertos vendidos por tipo</p>
+        <div className="grid grid-cols-2 gap-3 mb-6">
+          {VALE_TIPOS.map(tipo => (
+            <div key={tipo} className="p-3 rounded text-center" style={{ background: CP_BG }}>
+              <p style={{ fontFamily: FONT_HEAD, fontSize: 22, color: CP_COLOR }}>{porTipo[tipo]}</p>
+              <p style={{ fontFamily: FONT_BODY, fontSize: 11.5, color: MUTED, textTransform: "uppercase", letterSpacing: "0.06em" }}>{tipo}</p>
+            </div>
+          ))}
         </div>
 
         <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: MUTED, marginBottom: 10 }}>Salones vendidos por mes</p>

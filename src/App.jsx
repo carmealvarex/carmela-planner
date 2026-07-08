@@ -1130,10 +1130,10 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
 function EventDetail({ ev, jefeAreas, isAdmin, onEdit, onVaucher, onCronograma, onPlano, onVale, onComanda, tienePlantilla }) {
   return (
     <div className="p-5 rounded" style={{ background: CARD, border: `1px solid ${LINE}` }}>
+      <PrintHeader eyebrow="Ficha interna del evento" titulo={ev.nombreEvento || ev.salon || "Sin nombre"} />
       <div className="flex items-start justify-between mb-3">
         <div>
           {ev.colorEvento && <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: "50%", background: ev.colorEvento, marginRight: 6 }} />}
-          <h3 style={{ fontFamily: FONT_HEAD, fontSize: 22, color: INK, display: "inline" }}>{ev.nombreEvento || ev.salon || "Sin nombre"}</h3>
           <p style={{ fontFamily: FONT_BODY, fontSize: 13, color: MUTED }}>{ev.salon || "Sin salón"} · {fmtRangoFecha(ev)} · {ev.horaInicio}–{ev.horaFin} · {ev.personas || "?"} personas</p>
         </div>
         <Stamp estadoPago={ev.estadoPago} />
@@ -1189,8 +1189,9 @@ function EventDetail({ ev, jefeAreas, isAdmin, onEdit, onVaucher, onCronograma, 
       {ev.notas && <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}><b>Notas:</b> {ev.notas}</p>}
       {ev.controlInterno && <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}><b>Control interno:</b> {ev.controlInterno}</p>}
 
-      <div className="flex gap-2 mt-4 flex-wrap">
+      <div className="no-print flex gap-2 mt-4 flex-wrap">
         {isAdmin && <button onClick={onEdit} className="px-3 py-1.5 rounded text-xs font-medium" style={{ background: INK_SOFT, color: PAPER, fontFamily: FONT_BODY }}>Editar</button>}
+        <button onClick={() => window.print()} className="px-3 py-1.5 rounded text-xs font-medium" style={{ background: INK, color: "#fff", fontFamily: FONT_BODY }}>Imprimir ficha</button>
         <button onClick={onVaucher} className="px-3 py-1.5 rounded text-xs font-medium" style={{ background: ACCENT, color: "#fff", fontFamily: FONT_BODY }}>Ver / imprimir vaucher</button>
         <button onClick={onCronograma} className="px-3 py-1.5 rounded text-xs font-medium" style={{ background: PAGADO, color: PAPER, fontFamily: FONT_BODY }}>Ver cronograma</button>
         <button onClick={onComanda} className="px-3 py-1.5 rounded text-xs font-medium" style={{ border: `1px solid ${PAGADO}`, color: PAGADO, fontFamily: FONT_BODY }}>Ver / imprimir comanda</button>
@@ -1201,7 +1202,7 @@ function EventDetail({ ev, jefeAreas, isAdmin, onEdit, onVaucher, onCronograma, 
       </div>
 
       {ev.notificarJefeAreas && (
-        <div className="mt-5 pt-4" style={{ borderTop: `1px solid ${LINE}` }}>
+        <div className="no-print mt-5 pt-4" style={{ borderTop: `1px solid ${LINE}` }}>
           <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: MUTED, marginBottom: 8 }}>Avisar por WhatsApp</p>
           <a href={waLink(jefeAreas?.telefono, textoJefeAreas(ev))} target="_blank" rel="noreferrer"
             className="text-sm px-3 py-2 rounded flex justify-between items-center" style={{ background: PAGADO, color: PAPER, fontFamily: FONT_BODY }}>
@@ -1210,6 +1211,7 @@ function EventDetail({ ev, jefeAreas, isAdmin, onEdit, onVaucher, onCronograma, 
           <p style={{ fontFamily: FONT_BODY, fontSize: 11.5, color: MUTED, marginTop: 6 }}>Se abre un solo chat de WhatsApp con todo el detalle. Vos lo reenviás a los grupos que corresponda.</p>
         </div>
       )}
+      <p className="mt-6" style={{ fontFamily: FONT_MONO, fontSize: 10.5, color: MUTED }}>Generado el {new Date().toLocaleDateString("es-AR")}</p>
     </div>
   );
 }

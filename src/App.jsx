@@ -79,6 +79,34 @@ function fmtFecha(iso) {
   const d = fromISO(iso);
   return `${DIAS[(d.getDay() + 6) % 7]} ${d.getDate()} de ${MESES[d.getMonth()]}`;
 }
+// Devuelve todas las fechas ISO que ocupa un evento (para eventos de varios días,
+// ej: 14 al 18 de agosto). Si no tiene fechaFin (o es igual/anterior a fecha), es de un solo día.
+function fechasEvento(ev) {
+  const dias = [];
+  const inicio = fromISO(ev.fecha);
+  const fin = ev.fechaFin && ev.fechaFin > ev.fecha ? fromISO(ev.fechaFin) : inicio;
+  let cur = inicio;
+  let guard = 0;
+  while (cur <= fin && guard < 60) { // tope de seguridad: 60 días
+    dias.push(toISO(cur));
+    cur = addDays(cur, 1);
+    guard++;
+  }
+  return dias;
+}
+function eventoEnDia(ev, iso) {
+  if (!ev.fechaFin || ev.fechaFin <= ev.fecha) return ev.fecha === iso;
+  return iso >= ev.fecha && iso <= ev.fechaFin;
+}
+function esMultiDia(ev) { return !!ev.fechaFin && ev.fechaFin > ev.fecha; }
+// Formato lindo del rango de fechas: "14 al 18 de agosto" (o "30 de julio al 2 de agosto" si cruza de mes).
+function fmtRangoFecha(ev) {
+  if (!esMultiDia(ev)) return fmtFecha(ev.fecha);
+  const d1 = fromISO(ev.fecha), d2 = fromISO(ev.fechaFin);
+  const mismodMes = d1.getMonth() === d2.getMonth() && d1.getFullYear() === d2.getFullYear();
+  if (mismodMes) return `${d1.getDate()} al ${d2.getDate()} de ${MESES[d1.getMonth()]}`;
+  return `${d1.getDate()} de ${MESES[d1.getMonth()]} al ${d2.getDate()} de ${MESES[d2.getMonth()]}`;
+}
 function mondayOf(d) {
   const day = (d.getDay() + 6) % 7;
   const m = new Date(d);
@@ -139,7 +167,7 @@ function textoEvento(ev) {
   const lineas = [];
   lineas.push(`*Nombre de evento:* ${ev.nombreEvento || ev.servicio || "(sin nombre)"}`);
   lineas.push(`Horario: ${ev.horaInicio || "--:--"} a ${ev.horaFin || "--:--"}`);
-  lineas.push(`Fecha: ${fmtFecha(ev.fecha)}`);
+  lineas.push(`Fecha: ${fmtRangoFecha(ev)}`);
   lineas.push(`Cantidad de personas: ${ev.personas || "-"}`);
   lineas.push(`Salón: ${ev.salon || "(sin definir)"}`);
   if (ev.servicio) lineas.push(`Concepto: ${ev.servicio}`);
@@ -167,7 +195,7 @@ function textoEvento(ev) {
 function textoSemana(events, weekStart) {
   const desde = weekStart, hasta = addDays(weekStart, 6);
   const enSemana = events
-    .filter(e => { const f = fromISO(e.fecha); return f >= desde && f <= hasta; })
+    .filter(e => { const fi = fromISO(e.fecha), ff = e.fechaFin && e.fechaFin > e.fecha ? fromISO(e.fechaFin) : fi; return ff >= desde && fi <= hasta; })
     .sort((a, b) => a.fecha.localeCompare(b.fecha) || (a.horaInicio || "").localeCompare(b.horaInicio || ""));
   const header = `*Semana del ${desde.getDate()} al ${hasta.getDate()} de ${MESES[hasta.getMonth()]}*\n`;
   if (!enSemana.length) return header + "\nSin eventos cargados esta semana.";
@@ -228,12 +256,25 @@ function parseICS(text) {
     const clean = (s) => s.replace(/\\,/g, ",").replace(/\\n/gi, " ").replace(/\\;/g, ";");
     const start = parseICSDate(getField("DTSTART"));
     const end = parseICSDate(getField("DTEND"));
+    // Los eventos de todo el día en Google Calendar exportan DTEND como el día siguiente al último
+    // (exclusivo), así que si hay hora, restamos un día para el fechaFin cuando corresponda a eventos sin horario.
+    let fechaFin = "";
+    if (end.iso && start.iso && end.iso > start.iso) {
+      if (!start.time && !end.time) {
+        // todo el día: DTEND es exclusivo, restamos un día
+        const finReal = addDays(fromISO(end.iso), -1);
+        fechaFin = toISO(finReal) > start.iso ? toISO(finReal) : "";
+      } else {
+        fechaFin = end.iso;
+      }
+    }
     return {
       uid: getField("UID") || uid(),
       summary: clean(getField("SUMMARY")),
       location: clean(getField("LOCATION")),
       description: clean(getField("DESCRIPTION")),
       fecha: start.iso,
+      fechaFin,
       horaInicio: start.time || "09:00",
       horaFin: end.time || "13:00",
     };
@@ -242,7 +283,7 @@ function parseICS(text) {
 
 function blankEvent(fecha) {
   return {
-    id: uid(), fecha: fecha || toISO(new Date()), salon: "", salonOtro: "",
+    id: uid(), fecha: fecha || toISO(new Date()), fechaFin: "", salon: "", salonOtro: "",
     horaInicio: "09:00", horaFin: "13:00", horaArmado: "", horaDesarme: "",
     horaInicioManual: false, horaFinManual: false, horaArmadoManual: false, horaDesarmeManual: false,
     nombreEvento: "",
@@ -252,15 +293,15 @@ function blankEvent(fecha) {
     tarifaTipo: "completa",
     tarifaEspecialActiva: false, tarifaEspecial: "",
     valorSalon: "", // snapshot histórico del valor de salón aplicado al momento de guardar
-    // Salones adicionales: para cuando la misma empresa/planilla usa dos (o más) salones
-    // en simultáneo (ej: Salón Argos + Sala 1). Cada uno con su propia tarifa, congelada
-    // al guardar igual que el salón principal.
-    salonesAdicionales: [],
     empresaOrganiza: "", empresaContrata: "", empresaPaga: "",
-    contactoNombre: "", contactoVia: "",
+    cuit: "",
+    contactoNombre: "", contactoVia: "", // legado, se migra a `contactos` al abrir la ficha
+    contactos: [{ nombre: "", via: "" }],
     esHuesped: false,
+    huespedes: [],
     estadoPago: "pendiente", adelanto: "", comprobanteTexto: "", comprobanteLink: "",
-    retenciones: "no",
+    retenciones: "no", // legado, se migra a `facturas` al abrir la ficha
+    facturas: [],
     itemsPresupuesto: [],
     // Vale: documento de Administración. Tiene que coincidir con el N° de factura,
     // cuántos salones se vendieron y cuántos cubiertos, discriminados por tipo.
@@ -272,6 +313,7 @@ function blankEvent(fecha) {
     planoDibujo: "",
     notificarJefeAreas: false,
     notas: "",
+    controlInterno: "",
   };
 }
 
@@ -282,44 +324,15 @@ function blankEvent(fecha) {
 // del hotel (neto = total / 1.21, IVA = total - neto).
 // valorSalonOverride se usa mientras se está editando el formulario (antes de guardar), porque
 // ahí ev.valorSalon todavía no se actualizó con el valor vigente de la tarifa/tarifa especial.
-// salonesAdicionalesOverride se usa mientras se está editando el formulario (antes de guardar),
-// igual que valorSalonOverride: mientras se edita, cada salón adicional todavía no tiene su
-// valorSalon congelado, así que EventForm pasa la versión calculada en vivo.
-function totalItemsEvento(ev, valorSalonOverride, salonesAdicionalesOverride) {
+function totalItemsEvento(ev, valorSalonOverride) {
   const items = ev.itemsPresupuesto || [];
   const valorSalon = valorSalonOverride != null ? (Number(valorSalonOverride) || 0) : (Number(ev.valorSalon) || 0);
   const filaSalon = ev.salon ? [{ id: "auto-salon", detalle: `Salón (${ev.salon})`, cantidad: 1, valorUnitario: valorSalon, auto: true }] : [];
-
-  const adicionales = salonesAdicionalesOverride || ev.salonesAdicionales || [];
-  const filasAdicionales = adicionales.filter(sa => sa.salon).map(sa => ({
-    id: `auto-salon-${sa.id}`, detalle: `Salón (${sa.salon}) — adicional`, cantidad: 1,
-    valorUnitario: Number(sa.valorSalon) || 0, auto: true,
-  }));
-
-  // Cubiertos vendidos (comida) cargados en el Vale: se suman automáticamente acá para
-  // que la cotización/voucher y el estado de pago siempre coincidan con lo que se cargó
-  // en el Vale (salón + comida del vale).
-  const filasVale = (ev.vale?.tipos || []).map(t => ({
-    id: `auto-vale-${t.id}`, detalle: `${t.tipo} (según vale)`,
-    cantidad: Number(t.cantidad) || 0, valorUnitario: Number(t.valorUnitario) || 0, auto: true,
-  }));
-
-  const filas = [...filaSalon, ...filasAdicionales, ...filasVale, ...items];
+  const filas = [...filaSalon, ...items];
   const totalConIva = filas.reduce((s, i) => s + (Number(i.cantidad) || 0) * (Number(i.valorUnitario) || 0), 0);
   const sinIva = totalConIva / 1.21;
   const iva = totalConIva - sinIva;
   return { filas, sinIva, iva, totalConIva };
-}
-
-// Texto para mostrar salón principal + adicionales juntos (ej: "Salón Argos + Sala 1")
-function salonesTexto(ev) {
-  const nombres = [ev.salon, ...((ev.salonesAdicionales || []).map(sa => sa.salon))].filter(Boolean);
-  return nombres.length ? nombres.join(" + ") : "";
-}
-
-function tarifaLabel(ev) {
-  if (ev.tarifaEspecialActiva) return "Tarifa especial";
-  return ev.tarifaTipo === "completa" ? "Tarifa completa" : "Media tarifa";
 }
 
 /* ============================================================
@@ -462,7 +475,7 @@ function MonthView({ year, month, events, onPrev, onNext, onDayClick }) {
   const weeks = useMemo(() => getMonthGrid(year, month), [year, month]);
   const eventosPorDia = useMemo(() => {
     const map = {};
-    events.forEach(e => { (map[e.fecha] = map[e.fecha] || []).push(e); });
+    events.forEach(e => { fechasEvento(e).forEach(iso => { (map[iso] = map[iso] || []).push(e); }); });
     return map;
   }, [events]);
   const today = toISO(new Date());
@@ -499,7 +512,7 @@ function MonthView({ year, month, events, onPrev, onNext, onDayClick }) {
                       const fg = e.colorEvento ? "#fff" : (e.estadoPago === "total" ? PAGADO : (e.estadoPago === "parcial" || e.estadoPago === "sena") ? PARCIAL : PENDIENTE);
                       return (
                         <div key={e.id} className="truncate rounded px-1" style={{ fontSize: 10, background: bg, color: fg, fontFamily: FONT_BODY }}>
-                          {e.nombreEvento || e.salon || "Evento"}
+                          {esMultiDia(e) ? "↔ " : ""}{e.nombreEvento || e.salon || "Evento"}
                         </div>
                       );
                     })}
@@ -522,7 +535,7 @@ function WeekView({ weekStart, setWeekStart, events, isAdmin, onOpenEvent, onNew
   const [copiado, setCopiado] = useState(false);
   const desde = weekStart, hasta = addDays(weekStart, 6);
   const enSemana = events
-    .filter(e => { const f = fromISO(e.fecha); return f >= desde && f <= hasta; })
+    .filter(e => { const fi = fromISO(e.fecha), ff = e.fechaFin && e.fechaFin > e.fecha ? fromISO(e.fechaFin) : fi; return ff >= desde && fi <= hasta; })
     .sort((a, b) => a.fecha.localeCompare(b.fecha) || (a.horaInicio || "").localeCompare(b.horaInicio || ""));
   const texto = textoSemana(events, weekStart);
 
@@ -538,7 +551,7 @@ function WeekView({ weekStart, setWeekStart, events, isAdmin, onOpenEvent, onNew
         {enSemana.map(e => (
           <button key={e.id} onClick={() => onOpenEvent(e)} className="text-left p-3 rounded flex items-center justify-between" style={{ background: CARD, border: `1px solid ${LINE}` }}>
             <div>
-              <div style={{ fontFamily: FONT_BODY, fontWeight: 600, color: INK, fontSize: 14 }}>{fmtFecha(e.fecha)} — {e.salon || "Sin salón"}</div>
+              <div style={{ fontFamily: FONT_BODY, fontWeight: 600, color: INK, fontSize: 14 }}>{fmtRangoFecha(e)} — {e.salon || "Sin salón"}</div>
               <div style={{ fontFamily: FONT_BODY, fontSize: 12, color: MUTED }}>{e.horaInicio}–{e.horaFin} · {e.personas || "?"} personas</div>
             </div>
             <Stamp estadoPago={e.estadoPago} />
@@ -589,10 +602,42 @@ function Toggle({ checked, onChange, label }) {
    FORMULARIO DE EVENTO
    ============================================================ */
 function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
-  const [ev, setEv] = useState(() => ({ ...blankEvent(initial?.fecha), ...(initial || {}) }));
+  const [ev, setEv] = useState(() => {
+    const base = { ...blankEvent(initial?.fecha), ...(initial || {}) };
+    // Migración: fichas viejas tenían un solo contacto y una sola factura sueltos.
+    if (!base.contactos || !base.contactos.length) {
+      base.contactos = (base.contactoNombre || base.contactoVia) ? [{ nombre: base.contactoNombre || "", via: base.contactoVia || "" }] : [{ nombre: "", via: "" }];
+    }
+    if (!base.facturas) base.facturas = [];
+    if (!base.facturas.length && (base.comprobanteTexto || base.comprobanteLink)) {
+      base.facturas = [{ id: uid(), numero: base.comprobanteTexto || "", monto: "", fecha: "", link: base.comprobanteLink || "", retenciones: base.retenciones || "no" }];
+    }
+    if (!base.huespedes) base.huespedes = [];
+    return base;
+  });
   const set = (k, v) => setEv(prev => ({ ...prev, [k]: v }));
   const setVale = (k, v) => setEv(prev => ({ ...prev, vale: { ...prev.vale, [k]: v } }));
   const setComanda = (k, v) => setEv(prev => ({ ...prev, comanda: { ...prev.comanda, [k]: v } }));
+
+  const setContacto = (idx, campo, valor) => setEv(prev => ({ ...prev, contactos: prev.contactos.map((c, i) => i === idx ? { ...c, [campo]: valor } : c) }));
+  const agregarContacto = () => setEv(prev => ({ ...prev, contactos: [...prev.contactos, { nombre: "", via: "" }] }));
+  const quitarContacto = (idx) => setEv(prev => ({ ...prev, contactos: prev.contactos.filter((_, i) => i !== idx) }));
+
+  const [nuevaFactura, setNuevaFactura] = useState({ numero: "", monto: "", fecha: "", link: "", retenciones: "no" });
+  const agregarFactura = () => {
+    if (!nuevaFactura.numero.trim() && !nuevaFactura.monto) return;
+    setEv(prev => ({ ...prev, facturas: [...(prev.facturas || []), { id: uid(), ...nuevaFactura }] }));
+    setNuevaFactura({ numero: "", monto: "", fecha: "", link: "", retenciones: "no" });
+  };
+  const quitarFactura = (id) => setEv(prev => ({ ...prev, facturas: prev.facturas.filter(f => f.id !== id) }));
+
+  const [nuevoHuesped, setNuevoHuesped] = useState("");
+  const agregarHuesped = () => {
+    if (!nuevoHuesped.trim()) return;
+    setEv(prev => ({ ...prev, huespedes: [...(prev.huespedes || []), nuevoHuesped.trim()] }));
+    setNuevoHuesped("");
+  };
+  const quitarHuesped = (idx) => setEv(prev => ({ ...prev, huespedes: prev.huespedes.filter((_, i) => i !== idx) }));
   const [nuevoItem, setNuevoItem] = useState({ detalle: "", cantidad: "", valorUnitario: "" });
   const agregarItem = () => {
     if (!nuevoItem.detalle.trim() || !nuevoItem.cantidad || !nuevoItem.valorUnitario) return;
@@ -641,27 +686,7 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
   // se respeta; si es un evento nuevo o se tocó la tarifa, se recalcula una sola vez al guardar.
   const valorSalonAplicar = ev.tarifaEspecialActiva ? (Number(ev.tarifaEspecial) || 0) : (Number(tarifaValor) || 0);
 
-  // Salones adicionales (misma empresa/planilla usando 2+ salones en simultáneo).
-  // Igual que con el salón principal: mientras se edita, se calcula en vivo el valor
-  // según tarifario/tarifa especial; recién se congela en "valorSalon" al guardar.
-  const setSalonesAdicionales = (arr) => setEv(prev => ({ ...prev, salonesAdicionales: arr }));
-  const salonesAdicionalesConValor = (ev.salonesAdicionales || []).map(sa => {
-    const saSalonFinal = sa.salon === "Otro" ? sa.salonOtro : sa.salon;
-    const saTarifa = tarifas?.[saSalonFinal];
-    const saTarifaValor = sa.tarifaTipo === "completa" ? saTarifa?.completa : saTarifa?.media;
-    const valorSalon = sa.tarifaEspecialActiva ? (Number(sa.tarifaEspecial) || 0) : (Number(saTarifaValor) || 0);
-    return { ...sa, salon: saSalonFinal, valorSalon };
-  });
-  const agregarSalonAdicional = () => setSalonesAdicionales([
-    ...(ev.salonesAdicionales || []),
-    { id: uid(), salon: "", salonOtro: "", tarifaTipo: "completa", tarifaEspecialActiva: false, tarifaEspecial: "" },
-  ]);
-  const actualizarSalonAdicional = (id, k, v) => setSalonesAdicionales(
-    (ev.salonesAdicionales || []).map(sa => sa.id === id ? { ...sa, [k]: v } : sa)
-  );
-  const quitarSalonAdicional = (id) => setSalonesAdicionales((ev.salonesAdicionales || []).filter(sa => sa.id !== id));
-
-  const guardar = () => onSave({ ...ev, salon: salonFinal, valorSalon: valorSalonAplicar, salonesAdicionales: salonesAdicionalesConValor });
+  const guardar = () => onSave({ ...ev, salon: salonFinal, valorSalon: valorSalonAplicar });
 
   return (
     <div className="p-5 rounded" style={{ background: CARD, border: `1px solid ${LINE}` }}>
@@ -673,6 +698,10 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
 
       <div className="grid grid-cols-2 gap-x-4">
         <Field label="Fecha"><input type="date" style={{ ...inputStyle, colorScheme: "light" }} value={ev.fecha} onChange={e => set("fecha", e.target.value)} /></Field>
+        <Field label="Fecha de fin (solo si dura más de un día)">
+          <input type="date" style={{ ...inputStyle, colorScheme: "light" }} min={ev.fecha} value={ev.fechaFin || ""} onChange={e => set("fechaFin", e.target.value)} />
+          {esMultiDia(ev) && <p style={{ fontFamily: FONT_BODY, fontSize: 11, color: ACCENT, marginTop: 4 }}>Evento de {fechasEvento(ev).length} días: {fmtRangoFecha(ev)}. Va a aparecer marcado en todos esos días del calendario.</p>}
+        </Field>
         <Field label="Salón">
           <select style={inputStyle} value={ev.salon} onChange={e => set("salon", e.target.value)}>
             <option value="">Elegir salón…</option>
@@ -730,59 +759,13 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
             <span style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK, fontWeight: 600 }}>Usar tarifa especial (ignora el tarifario base)</span>
           </label>
           {ev.tarifaEspecialActiva && (
-            <input type="number" style={inputStyle} value={ev.tarifaEspecial} onChange={e => set("tarifaEspecial", e.target.value)} placeholder="Valor especial del salón $ (neto)" />
+            <input type="number" style={inputStyle} value={ev.tarifaEspecial} onChange={e => set("tarifaEspecial", e.target.value)} placeholder="Valor especial del salón $ (precio final, con IVA incluido)" />
           )}
         </div>
         <p style={{ fontFamily: FONT_BODY, fontSize: 11, color: MUTED, marginTop: 6 }}>
           El valor de salón que quede aplicado (especial o de tarifario) se guarda tal cual con la ficha: si el tarifario general cambia más adelante, este evento ya realizado no se ve afectado.
         </p>
       </Field>
-
-      <div className="p-3 rounded mb-4" style={{ background: HILITE_BG, border: `1px solid ${LINE}` }}>
-        <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: MUTED, marginBottom: 10 }}>
-          Salones adicionales (misma empresa usando 2 o más salones a la vez)
-        </p>
-        {(ev.salonesAdicionales || []).map(sa => {
-          const saSalonFinal = sa.salon === "Otro" ? sa.salonOtro : sa.salon;
-          const saTarifa = tarifas?.[saSalonFinal];
-          const saTarifaValor = sa.tarifaTipo === "completa" ? saTarifa?.completa : saTarifa?.media;
-          return (
-            <div key={sa.id} className="p-2.5 rounded mb-2" style={{ background: CARD, border: `1px solid ${LINE}` }}>
-              <div className="grid grid-cols-2 gap-x-4">
-                <Field label="Salón adicional">
-                  <select style={inputStyle} value={sa.salon} onChange={e => actualizarSalonAdicional(sa.id, "salon", e.target.value)}>
-                    <option value="">Elegir salón…</option>
-                    {SALONES_FIJOS.map(s => <option key={s} value={s}>{s}</option>)}
-                    <option value="Otro">Otro…</option>
-                  </select>
-                  {sa.salon === "Otro" && <input style={{ ...inputStyle, marginTop: 8 }} placeholder="Nombre del salón" value={sa.salonOtro} onChange={e => actualizarSalonAdicional(sa.id, "salonOtro", e.target.value)} />}
-                </Field>
-                <Field label="Tarifa">
-                  <div className="flex gap-3 items-center flex-wrap">
-                    <label className="flex items-center gap-1.5"><input type="radio" disabled={sa.tarifaEspecialActiva} checked={sa.tarifaTipo === "completa"} onChange={() => actualizarSalonAdicional(sa.id, "tarifaTipo", "completa")} /><span style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK }}>Completa</span></label>
-                    <label className="flex items-center gap-1.5"><input type="radio" disabled={sa.tarifaEspecialActiva} checked={sa.tarifaTipo === "media"} onChange={() => actualizarSalonAdicional(sa.id, "tarifaTipo", "media")} /><span style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK }}>Media</span></label>
-                  </div>
-                  {saSalonFinal && !sa.tarifaEspecialActiva && (
-                    <span style={{ fontFamily: FONT_MONO, fontSize: 12.5, color: ACCENT }}>{saTarifaValor ? `$ ${saTarifaValor}` : "Sin tarifa configurada"}</span>
-                  )}
-                </Field>
-              </div>
-              <label className="flex items-center gap-1.5 mb-2">
-                <input type="checkbox" checked={!!sa.tarifaEspecialActiva} onChange={e => actualizarSalonAdicional(sa.id, "tarifaEspecialActiva", e.target.checked)} />
-                <span style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK }}>Usar tarifa especial para este salón</span>
-              </label>
-              {sa.tarifaEspecialActiva && (
-                <input type="number" style={{ ...inputStyle, marginBottom: 8 }} value={sa.tarifaEspecial} onChange={e => actualizarSalonAdicional(sa.id, "tarifaEspecial", e.target.value)} placeholder="Valor especial del salón $" />
-              )}
-              <button type="button" onClick={() => quitarSalonAdicional(sa.id)} className="text-xs" style={{ color: PENDIENTE }}>Quitar este salón adicional</button>
-            </div>
-          );
-        })}
-        <button type="button" onClick={agregarSalonAdicional} className="px-3 py-2 rounded text-sm" style={{ background: INK_SOFT, color: PAPER }}>+ Agregar otro salón</button>
-        <p style={{ fontFamily: FONT_BODY, fontSize: 11, color: MUTED, marginTop: 8 }}>
-          Usalo cuando la misma empresa contrata dos salones para el mismo evento (ej: Salón Argos + Sala 1). Cada uno se agrega solo, con su propio valor, a la cotización de abajo.
-        </p>
-      </div>
 
       <Field label="Incluye (catering / comida)">
         <div className="flex flex-wrap gap-2 mb-2">
@@ -832,13 +815,45 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
         <Field label="Empresa que paga"><input style={inputStyle} value={ev.empresaPaga} onChange={e => set("empresaPaga", e.target.value)} /></Field>
       </div>
 
-      <div className="grid grid-cols-2 gap-x-4">
-        <Field label="Nombre del contacto"><input style={inputStyle} value={ev.contactoNombre || ""} onChange={e => set("contactoNombre", e.target.value)} placeholder="Ej: María Gómez" /></Field>
-        <Field label="Vía / número de contacto"><input style={inputStyle} value={ev.contactoVia || ""} onChange={e => set("contactoVia", e.target.value)} placeholder="Email o teléfono" /></Field>
-      </div>
+      <Field label="CUIT a facturar">
+        <input style={inputStyle} value={ev.cuit || ""} onChange={e => set("cuit", e.target.value)} placeholder="Ej: 30-12345678-9" />
+      </Field>
+
+      <Field label="Contacto/s (al menos uno, se puede agregar más de uno)">
+        <div className="flex flex-col gap-2 mb-2">
+          {ev.contactos.map((c, idx) => (
+            <div key={idx} className="grid grid-cols-2 gap-2 items-center" style={{ gridTemplateColumns: "1fr 1fr auto" }}>
+              <input style={inputStyle} value={c.nombre} onChange={e => setContacto(idx, "nombre", e.target.value)} placeholder="Nombre del contacto" />
+              <div className="flex gap-2">
+                <input style={inputStyle} value={c.via} onChange={e => setContacto(idx, "via", e.target.value)} placeholder="Email o teléfono" />
+                {ev.contactos.length > 1 && <button type="button" onClick={() => quitarContacto(idx)} style={{ color: PENDIENTE, fontSize: 12 }}>Quitar</button>}
+              </div>
+            </div>
+          ))}
+        </div>
+        <button type="button" onClick={agregarContacto} className="text-xs px-2.5 py-1 rounded" style={{ border: `1px solid ${LINE}`, color: ACCENT, fontFamily: FONT_BODY }}>+ Agregar otro contacto</button>
+      </Field>
 
       <Field label="Hospedaje">
         <Toggle checked={!!ev.esHuesped} onChange={v => set("esHuesped", v)} label="El cliente del evento es huésped del hotel" />
+        {ev.esHuesped && (
+          <div className="mt-3 p-2.5 rounded" style={{ background: HILITE_BG, border: `1px solid ${LINE}` }}>
+            <p style={{ fontFamily: FONT_BODY, fontSize: 12, color: MUTED, marginBottom: 8 }}>Nombres de las personas que se hospedan</p>
+            <div className="flex flex-col gap-1.5 mb-2">
+              {(ev.huespedes || []).map((h, idx) => (
+                <div key={idx} className="flex items-center gap-2 p-1.5 rounded" style={{ background: CARD }}>
+                  <span style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK, flex: 1 }}>{h}</span>
+                  <button type="button" onClick={() => quitarHuesped(idx)} style={{ color: PENDIENTE, fontSize: 12 }}>Quitar</button>
+                </div>
+              ))}
+              {!(ev.huespedes || []).length && <p style={{ fontFamily: FONT_BODY, fontSize: 12, color: MUTED }}>Sin huéspedes cargados todavía.</p>}
+            </div>
+            <div className="flex gap-2">
+              <input style={inputStyle} value={nuevoHuesped} onChange={e => setNuevoHuesped(e.target.value)} placeholder="Nombre y apellido" />
+              <button type="button" onClick={agregarHuesped} className="px-3 rounded text-sm" style={{ background: INK_SOFT, color: PAPER }}>+</button>
+            </div>
+          </div>
+        )}
       </Field>
 
       <div className="p-3 rounded mb-4" style={{ background: HILITE_BG, border: `1px solid ${LINE}` }}>
@@ -863,24 +878,6 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
                 <td></td>
               </tr>
             )}
-            {salonesAdicionalesConValor.filter(sa => sa.salon).map(sa => (
-              <tr key={sa.id} style={{ borderBottom: `1px solid ${LINE}`, opacity: 0.85 }}>
-                <td className="py-1">Salón ({sa.salon}) — adicional, automático</td>
-                <td className="text-right py-1">1</td>
-                <td className="text-right py-1">$ {(Number(sa.valorSalon) || 0).toFixed(2)}</td>
-                <td className="text-right py-1">$ {(Number(sa.valorSalon) || 0).toFixed(2)}</td>
-                <td></td>
-              </tr>
-            ))}
-            {(ev.vale.tipos || []).map(t => (
-              <tr key={`vale-${t.id}`} style={{ borderBottom: `1px solid ${LINE}`, opacity: 0.85 }}>
-                <td className="py-1">{t.tipo} — según vale</td>
-                <td className="text-right py-1">{t.cantidad}</td>
-                <td className="text-right py-1">$ {(Number(t.valorUnitario) || 0).toFixed(2)}</td>
-                <td className="text-right py-1">$ {((Number(t.cantidad) || 0) * (Number(t.valorUnitario) || 0)).toFixed(2)}</td>
-                <td></td>
-              </tr>
-            ))}
             {(ev.itemsPresupuesto || []).map(it => (
               <tr key={it.id} style={{ borderBottom: `1px solid ${LINE}` }}>
                 <td className="py-1">{it.detalle}</td>
@@ -892,12 +889,12 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
             ))}
             <tr>
               <td className="py-1 font-semibold" colSpan={3}>TOTAL (con IVA incluido)</td>
-              <td className="text-right py-1 font-semibold">$ {totalItemsEvento(ev, valorSalonAplicar, salonesAdicionalesConValor).totalConIva.toFixed(2)}</td>
+              <td className="text-right py-1 font-semibold">$ {totalItemsEvento(ev, valorSalonAplicar).totalConIva.toFixed(2)}</td>
               <td></td>
             </tr>
           </tbody>
         </table>
-        <p style={{ fontFamily: FONT_BODY, fontSize: 11, color: MUTED, marginBottom: 10 }}>El salón (y los salones adicionales) se agregan solos, con el valor congelado de la tarifa aplicada. Las filas "según vale" se cargan solas desde la sección de Vale, más abajo — para agregar o quitar comida del total, hacelo ahí. Acá abajo podés sumar otros ítems sueltos que no sean parte del vale (técnica, decoración, etc.).</p>
+        <p style={{ fontFamily: FONT_BODY, fontSize: 11, color: MUTED, marginBottom: 10 }}>El salón se agrega solo, con el valor congelado de la tarifa aplicada. Acá abajo cargás vos la comida y otros ítems (lunch, coffee break, técnica, etc.).</p>
         <div className="grid grid-cols-4 gap-2 items-end">
           <Field label="Detalle"><input style={inputStyle} value={nuevoItem.detalle} onChange={e => setNuevoItem(p => ({ ...p, detalle: e.target.value }))} placeholder="Ej: Coffee break" /></Field>
           <Field label="Cantidad"><input type="number" style={inputStyle} value={nuevoItem.cantidad} onChange={e => setNuevoItem(p => ({ ...p, cantidad: e.target.value }))} placeholder="Ej: 60" /></Field>
@@ -918,7 +915,7 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
         </div>
 
         {(() => {
-          const { sinIva, iva, totalConIva } = totalItemsEvento(ev, valorSalonAplicar, salonesAdicionalesConValor);
+          const { sinIva, iva, totalConIva } = totalItemsEvento(ev, valorSalonAplicar);
           return (
             <div className="p-2.5 rounded mb-3" style={{ background: CARD, border: `1px solid ${LINE}` }}>
               <p style={{ fontFamily: FONT_MONO, fontSize: 12.5, color: INK, marginBottom: 2 }}>Total cargado (precio final, con IVA incluido): $ {totalConIva.toFixed(2)}</p>
@@ -929,21 +926,52 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
           );
         })()}
 
-        <div className="grid grid-cols-2 gap-x-4">
-          <Field label="Número de factura"><input style={inputStyle} value={ev.comprobanteTexto} onChange={e => set("comprobanteTexto", e.target.value)} placeholder="Factura N°..." /></Field>
+        <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: MUTED, marginTop: 14, marginBottom: 10 }}>Facturación (uso interno — no aparece en el vaucher del cliente)</p>
+        {(ev.facturas || []).length > 0 && (
+          <table className="w-full mb-3" style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: INK, borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ borderBottom: `1px solid ${LINE}` }}>
+                <th className="text-left py-1">N° factura</th>
+                <th className="text-right py-1">Monto</th>
+                <th className="text-left py-1">Fecha</th>
+                <th className="text-left py-1">Retenciones</th>
+                <th className="text-left py-1">Comprobante</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {ev.facturas.map(f => (
+                <tr key={f.id} style={{ borderBottom: `1px solid ${LINE}` }}>
+                  <td className="py-1">{f.numero || "-"}</td>
+                  <td className="text-right py-1">{f.monto ? `$ ${Number(f.monto).toFixed(2)}` : "-"}</td>
+                  <td className="py-1">{f.fecha || "-"}</td>
+                  <td className="py-1">{f.retenciones === "si" ? "Sí" : "No"}</td>
+                  <td className="py-1">{f.link ? <a href={f.link} target="_blank" rel="noreferrer" style={{ color: ACCENT, textDecoration: "underline" }}>Ver</a> : "-"}</td>
+                  <td className="text-right py-1"><button type="button" onClick={() => quitarFactura(f.id)} style={{ color: PENDIENTE, fontSize: 11 }}>Quitar</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        <p style={{ fontFamily: FONT_BODY, fontSize: 11, color: MUTED, marginBottom: 8 }}>Agregá una fila por cada factura o pago recibido (por si hay más de un pago o más de un consumo facturado).</p>
+        <div className="grid grid-cols-3 gap-2 items-end mb-2">
+          <Field label="N° de factura"><input style={inputStyle} value={nuevaFactura.numero} onChange={e => setNuevaFactura(p => ({ ...p, numero: e.target.value }))} placeholder="Factura N°..." /></Field>
+          <Field label="Monto"><input type="number" style={inputStyle} value={nuevaFactura.monto} onChange={e => setNuevaFactura(p => ({ ...p, monto: e.target.value }))} placeholder="$ ..." /></Field>
+          <Field label="Fecha"><input type="date" style={{ ...inputStyle, colorScheme: "light" }} value={nuevaFactura.fecha} onChange={e => setNuevaFactura(p => ({ ...p, fecha: e.target.value }))} /></Field>
+        </div>
+        <div className="grid grid-cols-3 gap-2 items-end">
           <Field label="Retenciones">
-            <select style={inputStyle} value={ev.retenciones || "no"} onChange={e => set("retenciones", e.target.value)}>
+            <select style={inputStyle} value={nuevaFactura.retenciones} onChange={e => setNuevaFactura(p => ({ ...p, retenciones: e.target.value }))}>
               <option value="no">No</option>
               <option value="si">Sí</option>
             </select>
           </Field>
-        </div>
-        <div className="grid grid-cols-1 gap-x-4">
-          <Field label="Link de comprobante de transferencia o pago"><input style={inputStyle} value={ev.comprobanteLink} onChange={e => set("comprobanteLink", e.target.value)} placeholder="Link a Drive/Dropbox" /></Field>
+          <Field label="Link de comprobante"><input style={inputStyle} value={nuevaFactura.link} onChange={e => setNuevaFactura(p => ({ ...p, link: e.target.value }))} placeholder="Link a Drive/Dropbox" /></Field>
+          <button type="button" onClick={agregarFactura} className="px-3 py-2 rounded text-sm mb-4" style={{ background: INK_SOFT, color: PAPER }}>+ Agregar factura</button>
         </div>
 
         {(ev.estadoPago === "parcial" || ev.estadoPago === "sena") && (() => {
-          const { totalConIva } = totalItemsEvento(ev, valorSalonAplicar, salonesAdicionalesConValor);
+          const { totalConIva } = totalItemsEvento(ev, valorSalonAplicar);
           return (
             <div className="mt-3 p-3 rounded" style={{ background: PARCIAL_BG, border: `1px solid ${PARCIAL}` }}>
               <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: PARCIAL, marginBottom: 10, fontWeight: 600 }}>
@@ -968,7 +996,7 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
         </p>
         <div className="grid grid-cols-2 gap-x-4">
           <Field label="N° de vale (debe coincidir con la factura)">
-            <input style={inputStyle} value={ev.vale.numero} onChange={e => setVale("numero", e.target.value)} placeholder={ev.comprobanteTexto || "Ej: 0001-00001234"} />
+            <input style={inputStyle} value={ev.vale.numero} onChange={e => setVale("numero", e.target.value)} placeholder={ev.facturas?.[0]?.numero || "Ej: 0001-00001234"} />
           </Field>
           <Field label="Cantidad de salones vendidos"><input type="number" style={inputStyle} value={ev.vale.salonesVendidos} onChange={e => setVale("salonesVendidos", e.target.value)} placeholder="Ej: 1" /></Field>
         </div>
@@ -1083,6 +1111,10 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
 
       <Field label="Notas"><textarea style={{ ...inputStyle, minHeight: 60 }} value={ev.notas} onChange={e => set("notas", e.target.value)} /></Field>
 
+      <Field label="Control interno (checklist / seguimiento, no aparece en el vaucher)">
+        <textarea style={{ ...inputStyle, minHeight: 60 }} value={ev.controlInterno || ""} onChange={e => set("controlInterno", e.target.value)} placeholder="Ej: falta confirmar mantelería, pendiente llamar al proveedor de sonido..." />
+      </Field>
+
       <div className="flex gap-2 mt-4">
         <button onClick={guardar} className="px-4 py-2 rounded font-medium text-sm" style={{ background: INK_SOFT, color: PAPER, fontFamily: FONT_BODY }}>Guardar ficha</button>
         <button onClick={onCancel} className="px-4 py-2 rounded font-medium text-sm" style={{ border: `1px solid ${LINE}`, color: INK, fontFamily: FONT_BODY }}>Cancelar</button>
@@ -1102,7 +1134,7 @@ function EventDetail({ ev, jefeAreas, isAdmin, onEdit, onVaucher, onCronograma, 
         <div>
           {ev.colorEvento && <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: "50%", background: ev.colorEvento, marginRight: 6 }} />}
           <h3 style={{ fontFamily: FONT_HEAD, fontSize: 22, color: INK, display: "inline" }}>{ev.nombreEvento || ev.salon || "Sin nombre"}</h3>
-          <p style={{ fontFamily: FONT_BODY, fontSize: 13, color: MUTED }}>{salonesTexto(ev) || "Sin salón"} · {fmtFecha(ev.fecha)} · {ev.horaInicio}–{ev.horaFin} · {ev.personas || "?"} personas</p>
+          <p style={{ fontFamily: FONT_BODY, fontSize: 13, color: MUTED }}>{ev.salon || "Sin salón"} · {fmtRangoFecha(ev)} · {ev.horaInicio}–{ev.horaFin} · {ev.personas || "?"} personas</p>
         </div>
         <Stamp estadoPago={ev.estadoPago} />
       </div>
@@ -1110,20 +1142,39 @@ function EventDetail({ ev, jefeAreas, isAdmin, onEdit, onVaucher, onCronograma, 
       {ev.servicio && <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}><b>Concepto:</b> {ev.servicio}</p>}
       {checklistTexto(ev) && <p style={{ fontFamily: FONT_BODY, fontSize: 13, color: MUTED, marginBottom: 6 }}>{checklistTexto(ev)}</p>}
       {ev.tarifaTipo && <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}><b>Tarifa:</b> {ev.tarifaTipo === "completa" ? "Completa" : "Media tarifa"}</p>}
-      {ev.formatoArmado && <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}><b>Formato de armado:</b> {ev.formatoArmado}</p>}
+      {(ev.horaArmado || ev.horaDesarme) && (
+        <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}>
+          {ev.horaArmado && <><b>Armado:</b> {ev.horaArmado} </>}{ev.horaDesarme && <><b>· Desarme:</b> {ev.horaDesarme}</>}
+        </p>
+      )}
+      {ev.formatoArmado && <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}><b>Formato/tipo de armado:</b> {ev.formatoArmado}</p>}
+      {ev.tecnica?.length > 0 && <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}><b>Técnica:</b> {ev.tecnica.join(", ")}</p>}
       <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}>
         <b>Organiza:</b> {ev.empresaOrganiza || "-"} · <b>Contrata:</b> {ev.empresaContrata || "-"} · <b>Paga:</b> {ev.empresaPaga || "-"}
       </p>
-      {(ev.contactoNombre || ev.contactoVia) && (
+      {ev.cuit && <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}><b>CUIT a facturar:</b> {ev.cuit}</p>}
+      {(ev.contactos || []).filter(c => c.nombre || c.via).length > 0 && (
         <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}>
-          <b>Contacto:</b> {ev.contactoNombre || "-"} {ev.contactoVia ? `· ${ev.contactoVia}` : ""}
+          <b>Contacto/s:</b> {ev.contactos.filter(c => c.nombre || c.via).map((c, i) => `${c.nombre || "-"}${c.via ? ` · ${c.via}` : ""}`).join("  /  ")}
         </p>
       )}
-      {ev.esHuesped && <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}><b>Hospedaje:</b> Es huésped del hotel</p>}
-      {(ev.comprobanteTexto || ev.comprobanteLink) && (
+      {ev.esHuesped && (
         <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}>
-          <b>Pago:</b> {ev.comprobanteTexto ? `Factura ${ev.comprobanteTexto} · ` : ""}Retenciones: {ev.retenciones === "si" ? "Sí" : "No"} {ev.comprobanteLink && <a href={ev.comprobanteLink} target="_blank" rel="noreferrer" style={{ color: ACCENT, textDecoration: "underline" }}>Ver comprobante</a>}
+          <b>Hospedaje:</b> Es huésped del hotel{ev.huespedes?.length ? ` — ${ev.huespedes.join(", ")}` : ""}
         </p>
+      )}
+      {(ev.facturas || []).length > 0 && (
+        <div style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}>
+          <b>Facturación:</b>
+          <ul style={{ marginLeft: 18, listStyle: "disc" }}>
+            {ev.facturas.map(f => (
+              <li key={f.id}>
+                {f.numero ? `Factura ${f.numero}` : "Sin número"}{f.monto ? ` · $ ${Number(f.monto).toFixed(2)}` : ""}{f.fecha ? ` · ${f.fecha}` : ""} · Retenciones: {f.retenciones === "si" ? "Sí" : "No"}
+                {f.link && <> · <a href={f.link} target="_blank" rel="noreferrer" style={{ color: ACCENT, textDecoration: "underline" }}>Ver comprobante</a></>}
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
       {(ev.estadoPago === "parcial" || ev.estadoPago === "sena") && (() => {
         const { totalConIva } = totalItemsEvento(ev);
@@ -1136,6 +1187,7 @@ function EventDetail({ ev, jefeAreas, isAdmin, onEdit, onVaucher, onCronograma, 
       })()}
       {ev.comanda?.cubiertos && <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}><b>Comanda:</b> {ev.comanda.cubiertos} cubiertos {ev.comanda.caterer ? `· Catering: ${ev.comanda.caterer}` : ""}</p>}
       {ev.notas && <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}><b>Notas:</b> {ev.notas}</p>}
+      {ev.controlInterno && <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}><b>Control interno:</b> {ev.controlInterno}</p>}
 
       <div className="flex gap-2 mt-4 flex-wrap">
         {isAdmin && <button onClick={onEdit} className="px-3 py-1.5 rounded text-xs font-medium" style={{ background: INK_SOFT, color: PAPER, fontFamily: FONT_BODY }}>Editar</button>}
@@ -1177,29 +1229,27 @@ function Voucher({ ev, onBack }) {
         <button onClick={onBack} className="px-4 py-2 rounded text-sm font-medium" style={{ border: `1px solid ${LINE}`, color: INK, fontFamily: FONT_BODY }}>Volver</button>
       </div>
       <div className="p-8" style={{ background: CARD, border: `1px solid ${INK}`, maxWidth: 640, margin: "0 auto" }}>
-        <PrintHeader eyebrow="Orden de evento" titulo={ev.nombreEvento || salonesTexto(ev) || "Salón a confirmar"} />
+        <PrintHeader eyebrow="Orden de evento" titulo={ev.nombreEvento || ev.salon || "Salón a confirmar"} />
         <div className="flex justify-end -mt-2 mb-3"><Stamp estadoPago={ev.estadoPago} /></div>
         <div className="grid grid-cols-2 gap-y-2 gap-x-6 mb-4" style={{ fontFamily: FONT_BODY, fontSize: 13.5, color: INK }}>
-          <p><b>Salón:</b> {salonesTexto(ev) || "-"}</p>
-          <p><b>Fecha:</b> {fmtFecha(ev.fecha)}</p>
+          <p><b>Salón:</b> {ev.salon || "-"}</p>
+          <p><b>Fecha:</b> {fmtRangoFecha(ev)}</p>
           <p><b>Horario:</b> {ev.horaInicio} a {ev.horaFin}</p>
           <p><b>Personas:</b> {ev.personas || "-"}</p>
           <p><b>Concepto:</b> {ev.servicio || "-"}</p>
           <p><b>Tarifa:</b> {ev.tarifaTipo === "completa" ? "Completa" : "Media tarifa"}</p>
         </div>
         {checklistTexto(ev) && <p style={{ fontFamily: FONT_BODY, fontSize: 13.5, color: MUTED, marginBottom: 10 }}>{checklistTexto(ev)}</p>}
-        {ev.formatoArmado && <p style={{ fontFamily: FONT_BODY, fontSize: 13.5, color: INK, marginBottom: 10 }}><b>Formato de armado:</b> {ev.formatoArmado}</p>}
         <div className="p-3 mb-4" style={{ background: HILITE_BG, fontFamily: FONT_BODY, fontSize: 13.5, color: INK }}>
           <p><b>Organiza:</b> {ev.empresaOrganiza || "-"}</p>
           <p><b>Contrata:</b> {ev.empresaContrata || "-"}</p>
           <p><b>Paga:</b> {ev.empresaPaga || "-"}</p>
-          {(ev.contactoNombre || ev.contactoVia) && <p><b>Contacto:</b> {ev.contactoNombre || "-"} {ev.contactoVia ? `· ${ev.contactoVia}` : ""}</p>}
-          {ev.esHuesped && <p><b>Hospedaje:</b> Huésped del hotel</p>}
+          {ev.esHuesped && <p><b>Hospedaje:</b> Huésped del hotel{ev.huespedes?.length ? ` — ${ev.huespedes.join(", ")}` : ""}</p>}
         </div>
 
         {items.length > 0 && (
           <div className="mb-4">
-            <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: INK, marginBottom: 6, fontWeight: 600 }}>Cotización del evento</p>
+            <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: INK, marginBottom: 6, fontWeight: 600 }}>Servicios contratados</p>
             <table className="w-full" style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK, borderCollapse: "collapse", border: `1px solid ${INK}` }}>
               <thead>
                 <tr style={{ background: HILITE_BG }}>
@@ -1219,8 +1269,8 @@ function Voucher({ ev, onBack }) {
                   </tr>
                 ))}
                 <tr style={{ background: HILITE_BG, fontWeight: 700 }}>
-                  <td className="p-2" colSpan={3} style={{ border: `1px solid ${LINE}` }}>TOTAL</td>
-                  <td className="text-right p-2" style={{ border: `1px solid ${LINE}` }}>$ {sinIva.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</td>
+                  <td className="p-2" colSpan={3} style={{ border: `1px solid ${LINE}` }}>TOTAL (IVA incluido)</td>
+                  <td className="text-right p-2" style={{ border: `1px solid ${LINE}` }}>$ {totalConIva.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</td>
                 </tr>
               </tbody>
             </table>
@@ -1228,22 +1278,17 @@ function Voucher({ ev, onBack }) {
         )}
 
         <div className="p-3 mb-4 rounded" style={{ background: PARCIAL_BG, border: `1px solid ${PARCIAL}`, fontFamily: FONT_BODY, fontSize: 13.5, color: INK }}>
-          <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: PARCIAL, marginBottom: 8, fontWeight: 600 }}>Detalle de facturación</p>
-          <p><b>Ítems de comida:</b> {ev.incluye?.length ? ev.incluye.join(", ") : "-"}</p>
-          <p><b>Cantidad de personas:</b> {ev.personas || "-"}</p>
-          <div style={{ height: 1, background: PARCIAL, opacity: 0.3, margin: "8px 0" }} />
+          <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: PARCIAL, marginBottom: 8, fontWeight: 600 }}>Resumen de pago</p>
           <p><b>Valor sin IVA:</b> $ {sinIva.toFixed(2)}</p>
           <p><b>IVA (21%):</b> $ {iva.toFixed(2)}</p>
           <p style={{ fontWeight: 700 }}><b>Total del evento (con IVA):</b> $ {totalConIva.toFixed(2)}</p>
           <div style={{ height: 1, background: PARCIAL, opacity: 0.3, margin: "8px 0" }} />
           <p><b>Pagado:</b> $ {pagado.toFixed(2)}</p>
           <p><b>Saldo pendiente:</b> $ {saldo.toFixed(2)}</p>
-          {ev.comprobanteTexto && <p><b>N° de factura:</b> {ev.comprobanteTexto}</p>}
-          <p><b>Retenciones:</b> {ev.retenciones === "si" ? "Sí" : "No"}</p>
         </div>
 
-        {ev.notas && <p style={{ fontFamily: FONT_BODY, fontSize: 13.5, color: INK }}><b>Notas:</b> {ev.notas}</p>}
-        <p className="mt-8" style={{ fontFamily: FONT_MONO, fontSize: 10.5, color: MUTED }}>Generado el {new Date().toLocaleDateString("es-AR")}</p>
+        <p style={{ fontFamily: FONT_BODY, fontSize: 11, color: MUTED }}>Este comprobante confirma la reserva de la fecha con todo lo contratado. Ante cualquier consulta, comunicate con el hotel citando el nombre del evento y la fecha.</p>
+        <p className="mt-6" style={{ fontFamily: FONT_MONO, fontSize: 10.5, color: MUTED }}>Generado el {new Date().toLocaleDateString("es-AR")}</p>
       </div>
     </div>
   );
@@ -1267,9 +1312,9 @@ function Vale({ ev, onBack }) {
         <PrintHeader eyebrow="Vale · Control administrativo" titulo={`N° ${v.numero || "-"}`} />
         <div className="grid grid-cols-2 gap-y-2 gap-x-6 mb-4" style={{ fontFamily: FONT_BODY, fontSize: 13.5, color: INK }}>
           <p><b>N° de vale:</b> {v.numero || "-"}</p>
-          <p><b>N° de factura:</b> {ev.comprobanteTexto || "-"}</p>
-          <p><b>Fecha del evento:</b> {fmtFecha(ev.fecha)}</p>
-          <p><b>Salón:</b> {salonesTexto(ev) || "-"}</p>
+          <p><b>N° de factura:</b> {ev.facturas?.[0]?.numero || "-"}</p>
+          <p><b>Fecha del evento:</b> {fmtRangoFecha(ev)}</p>
+          <p><b>Salón:</b> {ev.salon || "-"}</p>
           <p><b>Salones vendidos:</b> {v.salonesVendidos || "-"}</p>
           <p><b>Personas:</b> {ev.personas || "-"}</p>
         </div>
@@ -1326,13 +1371,13 @@ function Comanda({ ev, onBack }) {
         <button onClick={onBack} className="px-4 py-2 rounded text-sm font-medium" style={{ border: `1px solid ${LINE}`, color: INK, fontFamily: FONT_BODY }}>Volver</button>
       </div>
       <div className="p-8" style={{ background: CARD, border: `1px solid ${INK}`, maxWidth: 640, margin: "0 auto" }}>
-        <PrintHeader eyebrow="Comanda de cocina" titulo={salonesTexto(ev) || "Salón"} />
+        <PrintHeader eyebrow="Comanda de cocina" titulo={ev.salon || "Salón"} />
         <div className="grid grid-cols-2 gap-y-2 gap-x-6 mb-4" style={{ fontFamily: FONT_BODY, fontSize: 13.5, color: INK }}>
-          <p><b>Fecha:</b> {fmtFecha(ev.fecha)}</p>
+          <p><b>Fecha:</b> {fmtRangoFecha(ev)}</p>
           <p><b>Horario:</b> {ev.horaInicio} a {ev.horaFin}</p>
           <p><b>Personas convocadas:</b> {ev.personas || "-"}</p>
           <p><b>Tipo de evento:</b> {ev.servicio || "-"}</p>
-          <p><b>Salón:</b> {salonesTexto(ev) || "-"}</p>
+          <p><b>Salón:</b> {ev.salon || "-"}</p>
           <p><b>Catering contratado:</b> {c.caterer || "-"}</p>
         </div>
 
@@ -1532,6 +1577,7 @@ function ImportICS({ onImport }) {
     const elegidos = parsed.filter(i => selected[i.uid]);
     const nuevos = elegidos.map(i => ({
       ...blankEvent(i.fecha),
+      fechaFin: i.fechaFin || "",
       salon: i.location || "", horaInicio: i.horaInicio, horaFin: i.horaFin,
       servicio: i.summary || "", notas: i.description || "",
     }));
@@ -1735,7 +1781,7 @@ function Cronograma({ ev, onBack }) {
       </div>
       <div className="p-6" style={{ background: CARD, border: `1px solid ${INK}`, maxWidth: 640, margin: "0 auto" }}>
         <PrintHeader eyebrow="Cronograma / hoja de ruta" titulo={ev.salon || "Salón"} />
-        <p style={{ fontFamily: FONT_BODY, fontSize: 13, color: MUTED, marginBottom: 16 }}>{fmtFecha(ev.fecha)}</p>
+        <p style={{ fontFamily: FONT_BODY, fontSize: 13, color: MUTED, marginBottom: 16 }}>{fmtRangoFecha(ev)}</p>
 
         <div className="flex flex-col gap-2 mb-5">
           {ordenados.map((b, i) => (
@@ -1799,17 +1845,12 @@ function Stats({ events }) {
   }, [delMes]);
 
   // Cantidad de salones vendidos por mes, para cada uno de los 5 salones fijos del hotel.
-  // Cuenta el salón principal (con el "cantidad de salones vendidos" del vale) y suma
-  // además cada salón adicional cargado en la ficha (ej: Salón Argos + Sala 1 = 1 en cada uno).
   const salonesVendidos = useMemo(() => {
     const map = {};
     SALONES_FIJOS.forEach(s => { map[s] = 0; });
     delMes.forEach(e => {
       const s = e.salon;
       if (s in map) map[s] += Number(e.vale?.salonesVendidos) || 1;
-      (e.salonesAdicionales || []).forEach(sa => {
-        if (sa.salon in map) map[sa.salon] += 1;
-      });
     });
     return map;
   }, [delMes]);
@@ -1925,8 +1966,8 @@ function BuscadorPorEmpresa({ events }) {
               return (
                 <div key={e.id} className="p-2.5 rounded flex items-center justify-between" style={{ background: HILITE_BG }}>
                   <div>
-                    <div style={{ fontFamily: FONT_BODY, fontWeight: 600, color: INK, fontSize: 13.5 }}>{fmtFecha(e.fecha)} — {e.nombreEvento || e.salon || "Sin nombre"}</div>
-                    <div style={{ fontFamily: FONT_BODY, fontSize: 12, color: MUTED }}>{salonesTexto(e)} · {tarifaLabel(e)}</div>
+                    <div style={{ fontFamily: FONT_BODY, fontWeight: 600, color: INK, fontSize: 13.5 }}>{fmtRangoFecha(e)} — {e.nombreEvento || e.salon || "Sin nombre"}</div>
+                    <div style={{ fontFamily: FONT_BODY, fontSize: 12, color: MUTED }}>{e.salon} · {tarifaLabel(e)}</div>
                   </div>
                   <div className="text-right">
                     <div style={{ fontFamily: FONT_MONO, fontSize: 13, color: INK, fontWeight: 600 }}>$ {totalConIva.toFixed(2)}</div>
@@ -2177,7 +2218,7 @@ export default function App() {
             onPrev={() => { if (month === 0) { setMonth(11); setYear(y => y - 1); } else setMonth(m => m - 1); }}
             onNext={() => { if (month === 11) { setMonth(0); setYear(y => y + 1); } else setMonth(m => m + 1); }}
             onDayClick={(iso) => {
-              const evsDia = events.filter(e => e.fecha === iso);
+              const evsDia = events.filter(e => eventoEnDia(e, iso));
               if (evsDia.length === 1) { setSelectedEvent(evsDia[0]); setView("ficha"); }
               else if (evsDia.length > 1) { setWeekStart(mondayOf(fromISO(iso))); setView("semana"); }
               else if (isAdmin) { setNewEventDate(iso); setEditingEvent(null); setView("nuevo"); }

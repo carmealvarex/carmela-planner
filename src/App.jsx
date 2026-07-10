@@ -43,6 +43,8 @@ const TECNICA_SUGERIDOS = ["Proyector", "Rotafolio", "Pantalla", "Micrófonos", 
 const SALONES_FIJOS = ["Salón Argos", "Sala España", "Sala 1", "Sala 2", "Salón Auditorio"];
 
 const VALE_TIPOS = ["Coffee break", "Almuerzo", "Cena", "Desayuno", "Brindis", "Finger food", "Otro"];
+// El N° de vale ahora es siempre automático y correlativo (no se carga a mano).
+function formatValeNumero(n) { return String(n).padStart(4, "0"); }
 
 const ESTADOS_PAGO = [
   ["pendiente", "Pendiente"],
@@ -631,6 +633,51 @@ function WeekView({ weekStart, setWeekStart, events, isAdmin, onOpenEvent, onNew
 }
 
 /* ============================================================
+   VISTA POR DÍA
+   ============================================================ */
+function DayView({ dia, setDia, events, isAdmin, onOpenEvent, onNewEvent }) {
+  const evsDia = events
+    .filter(e => eventoEnDia(e, toISO(dia)))
+    .sort((a, b) => (a.horaInicio || "").localeCompare(b.horaInicio || ""));
+  const diaSemana = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"][dia.getDay()];
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center justify-between">
+        <button onClick={() => setDia(addDays(dia, -1))} style={{ color: ACCENT }} className="text-xl px-2">‹</button>
+        <div className="text-center">
+          <h2 style={{ fontFamily: FONT_HEAD, fontSize: 18, color: INK }}>{diaSemana} {dia.getDate()} de {MESES[dia.getMonth()]}</h2>
+          <p style={{ fontFamily: FONT_BODY, fontSize: 11, color: MUTED }}>{dia.getFullYear()}</p>
+        </div>
+        <button onClick={() => setDia(addDays(dia, 1))} style={{ color: ACCENT }} className="text-xl px-2">›</button>
+      </div>
+
+      <div className="flex flex-col gap-2">
+        {evsDia.map(e => (
+          <button key={e.id} onClick={() => onOpenEvent(e)} className="text-left p-3 rounded flex items-center justify-between" style={{ background: CARD, border: `1px solid ${LINE}` }}>
+            <div>
+              <div style={{ fontFamily: FONT_BODY, fontWeight: 600, color: INK, fontSize: 14 }}>
+                {esMultiDia(e) ? "↔ " : ""}{e.nombreEvento || e.salon || "Evento"}
+              </div>
+              <div style={{ fontFamily: FONT_BODY, fontSize: 12, color: MUTED }}>
+                {e.salon || "Sin salón"} · {e.horaInicio}–{e.horaFin} · {e.personas || "?"} personas
+              </div>
+            </div>
+            <Stamp estadoPago={e.estadoPago} />
+          </button>
+        ))}
+        {!evsDia.length && <p style={{ fontFamily: FONT_BODY, fontSize: 13, color: MUTED }}>Sin eventos cargados este día.</p>}
+        {isAdmin && (
+          <button onClick={() => onNewEvent(toISO(dia))} className="p-3 rounded text-sm" style={{ border: `1px dashed ${ACCENT}`, color: ACCENT, fontFamily: FONT_BODY }}>
+            + Agregar evento a este día
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
    CHECKLIST TOGGLE
    ============================================================ */
 function Toggle({ checked, onChange, label }) {
@@ -700,12 +747,12 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
   };
   const quitarItem = (id) => setEv(prev => ({ ...prev, itemsPresupuesto: (prev.itemsPresupuesto || []).filter(i => i.id !== id) }));
 
-  const [nuevoTipoCubierto, setNuevoTipoCubierto] = useState({ tipo: VALE_TIPOS[0], cantidad: "", valorUnitario: "" });
+  const [nuevoTipoCubierto, setNuevoTipoCubierto] = useState({ tipo: VALE_TIPOS[0], cantidad: "", valorUnitario: "", comentario: "" });
   const agregarTipoCubierto = () => {
     if (!nuevoTipoCubierto.cantidad || !nuevoTipoCubierto.valorUnitario) return;
     setVale("tipos", [...(ev.vale.tipos || []), { id: uid(), ...nuevoTipoCubierto }]);
-    registrarHistorial(`Agregó al vale: ${nuevoTipoCubierto.cantidad} × ${nuevoTipoCubierto.tipo} a $ ${fmtMoney(Number(nuevoTipoCubierto.valorUnitario))} c/u`);
-    setNuevoTipoCubierto({ tipo: VALE_TIPOS[0], cantidad: "", valorUnitario: "" });
+    registrarHistorial(`Agregó al vale: ${nuevoTipoCubierto.cantidad} × ${nuevoTipoCubierto.tipo} a $ ${fmtMoney(Number(nuevoTipoCubierto.valorUnitario))} c/u${nuevoTipoCubierto.comentario ? ` (${nuevoTipoCubierto.comentario})` : ""}`);
+    setNuevoTipoCubierto({ tipo: VALE_TIPOS[0], cantidad: "", valorUnitario: "", comentario: "" });
   };
   const quitarTipoCubierto = (id) => {
     if (!window.confirm("¿Seguro que querés quitar este ítem del vale?")) return;
@@ -1132,8 +1179,8 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
           Registra cuántos salones y cuántos cubiertos se vendieron en este evento, discriminados por tipo (coffee break, almuerzo, cena, finger food, etc.). No es un comprobante fiscal: es lo que usa Administración para cruzar contra la factura.
         </p>
         <div className="grid grid-cols-2 gap-x-4">
-          <Field label="N° de vale (debe coincidir con la factura)">
-            <input style={inputStyle} value={ev.vale.numero} onChange={e => setVale("numero", e.target.value)} placeholder={ev.facturas?.[0]?.numero || "Ej: 0001-00001234"} />
+          <Field label="N° de vale (automático)">
+            <input style={{ ...inputStyle, background: HILITE_BG, color: MUTED, cursor: "not-allowed" }} value={ev.vale.numero || "Se asigna solo al guardar"} disabled readOnly />
           </Field>
           <Field label="Cantidad de salones vendidos"><input type="number" style={inputStyle} value={ev.vale.salonesVendidos} onChange={e => setVale("salonesVendidos", e.target.value)} placeholder="Ej: 1" /></Field>
         </div>
@@ -1146,6 +1193,7 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
                 <th className="text-right py-1">Cant.</th>
                 <th className="text-right py-1">Valor uni.</th>
                 <th className="text-right py-1">Valor total</th>
+                <th className="text-left py-1">Comentario</th>
                 <th></th>
               </tr>
             </thead>
@@ -1156,6 +1204,7 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
                   <td className="text-right py-1">{t.cantidad}</td>
                   <td className="text-right py-1">$ {fmtMoney(Number(t.valorUnitario))}</td>
                   <td className="text-right py-1">$ {fmtMoney((Number(t.cantidad) * Number(t.valorUnitario)))}</td>
+                  <td className="py-1" style={{ color: MUTED, fontStyle: t.comentario ? "normal" : "italic" }}>{t.comentario || "-"}</td>
                   <td className="text-right py-1"><button type="button" onClick={() => quitarTipoCubierto(t.id)} style={{ color: PENDIENTE, fontSize: 11 }}>Quitar</button></td>
                 </tr>
               ))}
@@ -1165,11 +1214,12 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
                 <td></td>
                 <td className="text-right py-1">$ {fmtMoney(ev.vale.tipos.reduce((s, t) => s + (Number(t.cantidad) || 0) * (Number(t.valorUnitario) || 0), 0))}</td>
                 <td></td>
+                <td></td>
               </tr>
             </tbody>
           </table>
         )}
-        <div className="grid grid-cols-4 gap-2 items-end">
+        <div className="grid grid-cols-4 gap-2 items-end mb-2">
           <Field label="Tipo">
             <select style={inputStyle} value={nuevoTipoCubierto.tipo} onChange={e => setNuevoTipoCubierto(p => ({ ...p, tipo: e.target.value }))}>
               {VALE_TIPOS.map(t => <option key={t} value={t}>{t}</option>)}
@@ -1179,6 +1229,9 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
           <Field label="Valor unitario"><input type="number" style={inputStyle} value={nuevoTipoCubierto.valorUnitario} onChange={e => setNuevoTipoCubierto(p => ({ ...p, valorUnitario: e.target.value }))} placeholder="Ej: 8000" /></Field>
           <button type="button" onClick={agregarTipoCubierto} className="px-3 py-2 rounded text-sm mb-4" style={{ background: CP_COLOR, color: "#fff" }}>+ Agregar tipo</button>
         </div>
+        <Field label="Comentario (opcional — ej: explicar 'Otro', alguna aclaración distinta)">
+          <input style={inputStyle} value={nuevoTipoCubierto.comentario} onChange={e => setNuevoTipoCubierto(p => ({ ...p, comentario: e.target.value }))} placeholder="Ej: menú vegetariano para 5 personas" />
+        </Field>
       </div>
 
       <div className="p-3 rounded mb-4" style={{ background: HILITE_BG, border: `1px solid ${LINE}` }}>
@@ -1412,6 +1465,7 @@ function FichaCompleta({ ev, jefeAreas, isAdmin, onEdit, onVaucher, onCronograma
                 <th className="text-right py-1">Cant.</th>
                 <th className="text-right py-1">Valor uni.</th>
                 <th className="text-right py-1">Valor total</th>
+                <th className="text-left py-1">Comentario</th>
               </tr>
             </thead>
             <tbody>
@@ -1421,6 +1475,7 @@ function FichaCompleta({ ev, jefeAreas, isAdmin, onEdit, onVaucher, onCronograma
                   <td className="text-right py-1">{t.cantidad}</td>
                   <td className="text-right py-1">$ {fmtMoney(Number(t.valorUnitario))}</td>
                   <td className="text-right py-1">$ {fmtMoney((Number(t.cantidad) * Number(t.valorUnitario)))}</td>
+                  <td className="py-1" style={{ color: MUTED }}>{t.comentario || "-"}</td>
                 </tr>
               ))}
               <tr style={{ fontWeight: 700 }}>
@@ -1428,6 +1483,7 @@ function FichaCompleta({ ev, jefeAreas, isAdmin, onEdit, onVaucher, onCronograma
                 <td className="text-right py-1">{ev.vale.tipos.reduce((s, t) => s + (Number(t.cantidad) || 0), 0)}</td>
                 <td></td>
                 <td className="text-right py-1">$ {fmtMoney(ev.vale.tipos.reduce((s, t) => s + (Number(t.cantidad) || 0) * (Number(t.valorUnitario) || 0), 0))}</td>
+                <td></td>
               </tr>
             </tbody>
           </table>
@@ -1716,6 +1772,7 @@ function Vale({ ev, onBack }) {
                   <th className="text-right py-1">Cant.</th>
                   <th className="text-right py-1">Valor uni.</th>
                   <th className="text-right py-1">Valor total</th>
+                  <th className="text-left py-1">Comentario</th>
                 </tr>
               </thead>
               <tbody>
@@ -1725,6 +1782,7 @@ function Vale({ ev, onBack }) {
                     <td className="text-right py-1">{t.cantidad}</td>
                     <td className="text-right py-1">$ {fmtMoney(Number(t.valorUnitario))}</td>
                     <td className="text-right py-1">$ {fmtMoney((Number(t.cantidad) * Number(t.valorUnitario)))}</td>
+                    <td className="py-1">{t.comentario || "-"}</td>
                   </tr>
                 ))}
                 <tr style={{ fontWeight: 700 }}>
@@ -1732,6 +1790,7 @@ function Vale({ ev, onBack }) {
                   <td className="text-right py-1">{totalCubiertos}</td>
                   <td></td>
                   <td className="text-right py-1">$ {fmtMoney(totalValor)}</td>
+                  <td></td>
                 </tr>
               </tbody>
             </table>
@@ -2628,6 +2687,7 @@ export default function App() {
   const [year, setYear] = useState(new Date().getFullYear());
   const [month, setMonth] = useState(new Date().getMonth());
   const [weekStart, setWeekStart] = useState(mondayOf(new Date()));
+  const [diaSeleccionado, setDiaSeleccionado] = useState(new Date());
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [editingEvent, setEditingEvent] = useState(null);
   const [newEventDate, setNewEventDate] = useState(null);
@@ -2705,11 +2765,20 @@ export default function App() {
   useEffect(() => { if (role === "guest") setView("semana"); }, [role]);
 
   const handleSaveEvent = (ev) => {
+    // El N° de vale es siempre automático: se asigna una sola vez, la primera vez que
+    // se guarda la ficha (si ya tenía uno asignado, se respeta y no se vuelve a tocar).
+    let finalEv = ev;
+    if (!ev.vale?.numero) {
+      const numero = formatValeNumero(proximoVale);
+      finalEv = { ...ev, vale: { ...ev.vale, numero } };
+      setProximoVale(proximoVale + 1);
+      saveShared("config", { pin, proximoVale: proximoVale + 1 });
+    }
     setEvents(prev => {
-      const exists = prev.some(e => e.id === ev.id);
-      return exists ? prev.map(e => e.id === ev.id ? ev : e) : [...prev, ev];
+      const exists = prev.some(e => e.id === finalEv.id);
+      return exists ? prev.map(e => e.id === finalEv.id ? finalEv : e) : [...prev, finalEv];
     });
-    setSelectedEvent(ev); setEditingEvent(null); setNewEventDate(null); setView("ficha");
+    setSelectedEvent(finalEv); setEditingEvent(null); setNewEventDate(null); setView("ficha");
     showToast("Ficha guardada ✓");
   };
   const handleDeleteEvent = (id) => {
@@ -2769,8 +2838,8 @@ export default function App() {
 
       <nav className="no-print px-5 py-3 flex gap-4 flex-wrap" style={{ background: CARD, borderBottom: `1px solid ${LINE}` }}>
         {(isAdmin
-          ? [["calendario", "Mes"], ["semana", "Semana"], ["buscar", "Buscar"], ["estadisticas", "Estadísticas"], ["ajustes", "Ajustes"]]
-          : [["calendario", "Mes"], ["semana", "Semana"], ["buscar", "Buscar"], ["estadisticas", "Estadísticas"]]
+          ? [["calendario", "Mes"], ["semana", "Semana"], ["dia", "Día"], ["buscar", "Buscar"], ["estadisticas", "Estadísticas"], ["ajustes", "Ajustes"]]
+          : [["calendario", "Mes"], ["semana", "Semana"], ["dia", "Día"], ["buscar", "Buscar"], ["estadisticas", "Estadísticas"]]
         ).map(([key, label]) => (
           <button key={key} onClick={() => setView(key)} className="text-sm font-medium pb-1"
             style={{ fontFamily: FONT_BODY, color: view === key ? INK : MUTED, borderBottom: view === key ? `2px solid ${ACCENT}` : "2px solid transparent" }}>
@@ -2822,17 +2891,19 @@ export default function App() {
           <MonthView year={year} month={month} events={events}
             onPrev={() => { if (month === 0) { setMonth(11); setYear(y => y - 1); } else setMonth(m => m - 1); }}
             onNext={() => { if (month === 11) { setMonth(0); setYear(y => y + 1); } else setMonth(m => m + 1); }}
-            onDayClick={(iso) => {
-              const evsDia = events.filter(e => eventoEnDia(e, iso));
-              if (evsDia.length === 1) { setSelectedEvent(evsDia[0]); setView("ficha"); }
-              else if (evsDia.length > 1) { setWeekStart(mondayOf(fromISO(iso))); setView("semana"); }
-              else if (isAdmin) { setNewEventDate(iso); setEditingEvent(null); setView("nuevo"); }
-            }}
+            onDayClick={(iso) => { setDiaSeleccionado(fromISO(iso)); setView("dia"); }}
           />
         )}
 
         {view === "semana" && (
           <WeekView weekStart={weekStart} setWeekStart={setWeekStart} events={events} isAdmin={isAdmin}
+            onOpenEvent={(e) => { setSelectedEvent(e); setView("ficha"); }}
+            onNewEvent={(iso) => { setNewEventDate(iso); setEditingEvent(null); setView("nuevo"); }}
+          />
+        )}
+
+        {view === "dia" && (
+          <DayView dia={diaSeleccionado} setDia={setDiaSeleccionado} events={events} isAdmin={isAdmin}
             onOpenEvent={(e) => { setSelectedEvent(e); setView("ficha"); }}
             onNewEvent={(iso) => { setNewEventDate(iso); setEditingEvent(null); setView("nuevo"); }}
           />

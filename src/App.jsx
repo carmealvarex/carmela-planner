@@ -2180,7 +2180,7 @@ function BuscadorPorEmpresa({ events }) {
                 <div key={e.id} className="p-2.5 rounded flex items-center justify-between" style={{ background: HILITE_BG }}>
                   <div>
                     <div style={{ fontFamily: FONT_BODY, fontWeight: 600, color: INK, fontSize: 13.5 }}>{fmtRangoFecha(e)} — {e.nombreEvento || e.salon || "Sin nombre"}</div>
-                    <div style={{ fontFamily: FONT_BODY, fontSize: 12, color: MUTED }}>{e.salon} · {tarifaLabel(e)}</div>
+                    <div style={{ fontFamily: FONT_BODY, fontSize: 12, color: MUTED }}>{e.salon} · {e.tarifaTipo === "completa" ? "Tarifa completa" : "Media tarifa"}</div>
                   </div>
                   <div className="text-right">
                     <div style={{ fontFamily: FONT_MONO, fontSize: 13, color: INK, fontWeight: 600 }}>$ {fmtMoney(totalConIva)}</div>

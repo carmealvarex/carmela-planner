@@ -1112,30 +1112,22 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
 
         <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: MUTED, marginTop: 14, marginBottom: 10 }}>Facturación (uso interno — no aparece en el vaucher del cliente)</p>
         {(ev.facturas || []).length > 0 && (
-          <table className="w-full mb-3" style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: INK, borderCollapse: "collapse" }}>
-            <thead>
-              <tr style={{ borderBottom: `1px solid ${LINE}` }}>
-                <th className="text-left py-1">N° factura</th>
-                <th className="text-right py-1">Monto</th>
-                <th className="text-left py-1">Fecha</th>
-                <th className="text-left py-1">Retenciones</th>
-                <th className="text-left py-1">Comprobante</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {ev.facturas.map(f => (
-                <tr key={f.id} style={{ borderBottom: `1px solid ${LINE}` }}>
-                  <td className="py-1">{f.numero || "-"}</td>
-                  <td className="text-right py-1">{f.monto ? `$ ${fmtMoney(Number(f.monto))}` : "-"}</td>
-                  <td className="py-1">{f.fecha || "-"}</td>
-                  <td className="py-1">{f.retenciones === "si" ? "Sí" : "No"}</td>
-                  <td className="py-1">{f.link ? <a href={f.link} target="_blank" rel="noreferrer" style={{ color: ACCENT, textDecoration: "underline" }}>Ver</a> : "-"}</td>
-                  <td className="text-right py-1"><button type="button" onClick={() => quitarFactura(f.id)} style={{ color: PENDIENTE, fontSize: 11 }}>Quitar</button></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="flex flex-col gap-2 mb-3">
+            {ev.facturas.map(f => (
+              <div key={f.id} className="p-2.5 rounded" style={{ background: CARD, border: `1px solid ${LINE}` }}>
+                <div className="flex items-start justify-between gap-2">
+                  <div style={{ fontFamily: FONT_BODY, fontSize: 13.5, color: INK, fontWeight: 600 }}>Factura N° {f.numero || "-"}</div>
+                  <button type="button" onClick={() => quitarFactura(f.id)} style={{ color: PENDIENTE, fontSize: 11, whiteSpace: "nowrap", flexShrink: 0 }}>Quitar</button>
+                </div>
+                <div className="grid grid-cols-2 gap-x-3 gap-y-1 mt-1.5" style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: INK }}>
+                  <div><span style={{ color: MUTED }}>Monto: </span>{f.monto ? `$ ${fmtMoney(Number(f.monto))}` : "-"}</div>
+                  <div><span style={{ color: MUTED }}>Fecha: </span>{f.fecha || "-"}</div>
+                  <div><span style={{ color: MUTED }}>Retenciones: </span>{f.retenciones === "si" ? "Sí" : "No"}</div>
+                  <div><span style={{ color: MUTED }}>Comprobante: </span>{f.link ? <a href={f.link} target="_blank" rel="noreferrer" style={{ color: ACCENT, textDecoration: "underline" }}>Ver</a> : "-"}</div>
+                </div>
+              </div>
+            ))}
+          </div>
         )}
         <p style={{ fontFamily: FONT_BODY, fontSize: 11, color: MUTED, marginBottom: 8 }}>Agregá una fila por cada factura o pago recibido (por si hay más de un pago o más de un consumo facturado).</p>
         <div className="grid grid-cols-3 gap-2 items-end mb-2">

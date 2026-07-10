@@ -1178,38 +1178,26 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
         </div>
 
         {(ev.vale.tipos || []).length > 0 && (
-          <table className="w-full mb-3" style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: INK, borderCollapse: "collapse" }}>
-            <thead>
-              <tr style={{ borderBottom: `1px solid ${CP_COLOR}` }}>
-                <th className="text-left py-1">Tipo de cubierto</th>
-                <th className="text-right py-1">Cant.</th>
-                <th className="text-right py-1">Valor uni.</th>
-                <th className="text-right py-1">Valor total</th>
-                <th className="text-left py-1">Comentario</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {ev.vale.tipos.map(t => (
-                <tr key={t.id} style={{ borderBottom: `1px solid ${LINE}` }}>
-                  <td className="py-1">{t.tipo}</td>
-                  <td className="text-right py-1">{t.cantidad}</td>
-                  <td className="text-right py-1">$ {fmtMoney(Number(t.valorUnitario))}</td>
-                  <td className="text-right py-1">$ {fmtMoney((Number(t.cantidad) * Number(t.valorUnitario)))}</td>
-                  <td className="py-1" style={{ color: MUTED, fontStyle: t.comentario ? "normal" : "italic" }}>{t.comentario || "-"}</td>
-                  <td className="text-right py-1"><button type="button" onClick={() => quitarTipoCubierto(t.id)} style={{ color: PENDIENTE, fontSize: 11 }}>Quitar</button></td>
-                </tr>
-              ))}
-              <tr style={{ fontWeight: 700 }}>
-                <td className="py-1">TOTAL cubiertos vendidos</td>
-                <td className="text-right py-1">{ev.vale.tipos.reduce((s, t) => s + (Number(t.cantidad) || 0), 0)}</td>
-                <td></td>
-                <td className="text-right py-1">$ {fmtMoney(ev.vale.tipos.reduce((s, t) => s + (Number(t.cantidad) || 0) * (Number(t.valorUnitario) || 0), 0))}</td>
-                <td></td>
-                <td></td>
-              </tr>
-            </tbody>
-          </table>
+          <div className="flex flex-col gap-2 mb-3">
+            {ev.vale.tipos.map(t => (
+              <div key={t.id} className="p-2.5 rounded" style={{ background: CARD, border: `1px solid ${LINE}` }}>
+                <div className="flex items-start justify-between gap-2">
+                  <div style={{ fontFamily: FONT_BODY, fontSize: 13.5, color: INK, fontWeight: 600 }}>{t.tipo}</div>
+                  <button type="button" onClick={() => quitarTipoCubierto(t.id)} style={{ color: PENDIENTE, fontSize: 11, whiteSpace: "nowrap", flexShrink: 0 }}>Quitar</button>
+                </div>
+                <div className="grid grid-cols-2 gap-x-3 gap-y-1 mt-1.5" style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: INK }}>
+                  <div><span style={{ color: MUTED }}>Cantidad: </span>{t.cantidad}</div>
+                  <div><span style={{ color: MUTED }}>Valor uni.: </span>$ {fmtMoney(Number(t.valorUnitario))}</div>
+                  <div className="col-span-2"><span style={{ color: MUTED }}>Valor total: </span>$ {fmtMoney((Number(t.cantidad) * Number(t.valorUnitario)))}</div>
+                  {t.comentario && <div className="col-span-2"><span style={{ color: MUTED }}>Comentario: </span>{t.comentario}</div>}
+                </div>
+              </div>
+            ))}
+            <div className="p-2.5 rounded flex items-center justify-between" style={{ background: HILITE_BG, border: `1px solid ${CP_COLOR}` }}>
+              <span style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK, fontWeight: 700 }}>TOTAL cubiertos vendidos: {ev.vale.tipos.reduce((s, t) => s + (Number(t.cantidad) || 0), 0)}</span>
+              <span style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK, fontWeight: 700 }}>$ {fmtMoney(ev.vale.tipos.reduce((s, t) => s + (Number(t.cantidad) || 0) * (Number(t.valorUnitario) || 0), 0))}</span>
+            </div>
+          </div>
         )}
         <div className="grid grid-cols-4 gap-2 items-end mb-2">
           <Field label="Tipo">
@@ -1450,35 +1438,23 @@ function FichaCompleta({ ev, jefeAreas, isAdmin, onEdit, onVaucher, onCronograma
           <b>N° de vale:</b> {ev.vale?.numero || "-"} · <b>Salones vendidos:</b> {ev.vale?.salonesVendidos || "1"}
         </p>
         {(ev.vale?.tipos || []).length > 0 ? (
-          <table className="w-full" style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: INK, borderCollapse: "collapse" }}>
-            <thead>
-              <tr style={{ borderBottom: `1px solid ${CP_COLOR}` }}>
-                <th className="text-left py-1">Tipo de cubierto</th>
-                <th className="text-right py-1">Cant.</th>
-                <th className="text-right py-1">Valor uni.</th>
-                <th className="text-right py-1">Valor total</th>
-                <th className="text-left py-1">Comentario</th>
-              </tr>
-            </thead>
-            <tbody>
-              {ev.vale.tipos.map(t => (
-                <tr key={t.id} style={{ borderBottom: `1px solid ${LINE}` }}>
-                  <td className="py-1">{t.tipo}</td>
-                  <td className="text-right py-1">{t.cantidad}</td>
-                  <td className="text-right py-1">$ {fmtMoney(Number(t.valorUnitario))}</td>
-                  <td className="text-right py-1">$ {fmtMoney((Number(t.cantidad) * Number(t.valorUnitario)))}</td>
-                  <td className="py-1" style={{ color: MUTED }}>{t.comentario || "-"}</td>
-                </tr>
-              ))}
-              <tr style={{ fontWeight: 700 }}>
-                <td className="py-1">TOTAL cubiertos vendidos</td>
-                <td className="text-right py-1">{ev.vale.tipos.reduce((s, t) => s + (Number(t.cantidad) || 0), 0)}</td>
-                <td></td>
-                <td className="text-right py-1">$ {fmtMoney(ev.vale.tipos.reduce((s, t) => s + (Number(t.cantidad) || 0) * (Number(t.valorUnitario) || 0), 0))}</td>
-                <td></td>
-              </tr>
-            </tbody>
-          </table>
+          <div className="flex flex-col gap-2">
+            {ev.vale.tipos.map(t => (
+              <div key={t.id} className="p-2.5 rounded" style={{ background: CARD, border: `1px solid ${LINE}` }}>
+                <div style={{ fontFamily: FONT_BODY, fontSize: 13.5, color: INK, fontWeight: 600 }}>{t.tipo}</div>
+                <div className="grid grid-cols-2 gap-x-3 gap-y-1 mt-1.5" style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: INK }}>
+                  <div><span style={{ color: MUTED }}>Cantidad: </span>{t.cantidad}</div>
+                  <div><span style={{ color: MUTED }}>Valor uni.: </span>$ {fmtMoney(Number(t.valorUnitario))}</div>
+                  <div className="col-span-2"><span style={{ color: MUTED }}>Valor total: </span>$ {fmtMoney((Number(t.cantidad) * Number(t.valorUnitario)))}</div>
+                  {t.comentario && <div className="col-span-2"><span style={{ color: MUTED }}>Comentario: </span>{t.comentario}</div>}
+                </div>
+              </div>
+            ))}
+            <div className="p-2.5 rounded flex items-center justify-between" style={{ background: HILITE_BG, border: `1px solid ${CP_COLOR}` }}>
+              <span style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK, fontWeight: 700 }}>TOTAL cubiertos vendidos: {ev.vale.tipos.reduce((s, t) => s + (Number(t.cantidad) || 0), 0)}</span>
+              <span style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK, fontWeight: 700 }}>$ {fmtMoney(ev.vale.tipos.reduce((s, t) => s + (Number(t.cantidad) || 0) * (Number(t.valorUnitario) || 0), 0))}</span>
+            </div>
+          </div>
         ) : <p style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: MUTED }}>Sin tipos de cubiertos cargados en el Vale.</p>}
       </div>
 

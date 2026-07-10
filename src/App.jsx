@@ -310,6 +310,12 @@ function blankEvent(fecha) {
     tarifaTipo: "completa",
     tarifaEspecialActiva: false, tarifaEspecial: "",
     valorSalon: "", // snapshot histórico del valor de salón aplicado al momento de guardar
+    // Salón adicional: para cuando la empresa contrata dos salones en simultáneo en el mismo
+    // evento (ej: una sala chica para directivos + un salón grande para capacitación).
+    salonAdicionalActivo: false, salonAdicional: "", salonAdicionalOtro: "",
+    tarifaTipoAdicional: "completa",
+    tarifaEspecialActivaAdicional: false, tarifaEspecialAdicional: "",
+    valorSalonAdicional: "", // snapshot histórico del valor del salón adicional
     empresaOrganiza: "", empresaContrata: "", empresaPaga: "",
     cuit: "",
     contactoNombre: "", contactoVia: "", // legado, se migra a `contactos` al abrir la ficha
@@ -340,19 +346,33 @@ function blankEvent(fecha) {
 // son SIEMPRE precios finales, con IVA ya incluido (así se los cobra al cliente) — el programa
 // no suma IVA, lo DISCRIMINA hacia atrás a partir de ese total, igual que la factura oficial
 // del hotel (neto = total / 1.21, IVA = total - neto).
-// valorSalonOverride se usa mientras se está editando el formulario (antes de guardar), porque
+// overrideSalon se usa mientras se está editando el formulario (antes de guardar), porque
 // ahí ev.valorSalon todavía no se actualizó con el valor vigente de la tarifa/tarifa especial.
-function totalItemsEvento(ev, valorSalonOverride) {
+// Puede ser un número (compatibilidad vieja, solo salón principal) o un objeto
+// { principal, adicional } para previsualizar también el salón adicional en edición.
+// La cantidad del salón (y del salón adicional, si lo hay) se calcula sola a partir de
+// la cantidad de días que dura el evento (fecha → fechaFin): un evento de 2 días de salón
+// carga automáticamente 2 días de tarifa, sin que haya que tocar nada a mano.
+function totalItemsEvento(ev, overrideSalon) {
   const items = ev.itemsPresupuesto || [];
-  const valorSalon = valorSalonOverride != null ? (Number(valorSalonOverride) || 0) : (Number(ev.valorSalon) || 0);
-  const filaSalon = ev.salon ? [{ id: "auto-salon", detalle: `Salón (${ev.salon})`, cantidad: 1, valorUnitario: valorSalon, auto: true }] : [];
+  const dias = fechasEvento(ev).length;
+  const overridePrincipal = overrideSalon != null && typeof overrideSalon === "object" ? overrideSalon.principal : overrideSalon;
+  const overrideAdicional = overrideSalon != null && typeof overrideSalon === "object" ? overrideSalon.adicional : undefined;
+  const valorSalon = overridePrincipal != null ? (Number(overridePrincipal) || 0) : (Number(ev.valorSalon) || 0);
+  const detalleSalon = `Salón (${ev.salon})${dias > 1 ? ` — ${dias} días` : ""}`;
+  const filaSalon = ev.salon ? [{ id: "auto-salon", detalle: detalleSalon, cantidad: dias, valorUnitario: valorSalon, auto: true }] : [];
+  // Salón adicional: para cuando un mismo evento usa dos salones en simultáneo
+  // (ej: una empresa contrata un salón chico para directivos y uno grande para capacitación).
+  const valorSalonAdicional = overrideAdicional != null ? (Number(overrideAdicional) || 0) : (Number(ev.valorSalonAdicional) || 0);
+  const detalleSalonAdicional = `Salón adicional (${ev.salonAdicional})${dias > 1 ? ` — ${dias} días` : ""}`;
+  const filaSalonAdicional = ev.salonAdicional ? [{ id: "auto-salon-adicional", detalle: detalleSalonAdicional, cantidad: dias, valorUnitario: valorSalonAdicional, auto: true }] : [];
   // Los ítems cargados en el Vale (comida: coffee break, almuerzo, cena, etc.) se suman
   // automáticamente acá, igual que el salón — así no hace falta cargarlos dos veces
   // (una en el Vale y otra en la cotización).
   const filasVale = (ev.vale?.tipos || []).map(t => ({
     id: `auto-vale-${t.id}`, detalle: t.tipo, cantidad: Number(t.cantidad) || 0, valorUnitario: Number(t.valorUnitario) || 0, auto: true,
   }));
-  const filas = [...filaSalon, ...filasVale, ...items];
+  const filas = [...filaSalon, ...filaSalonAdicional, ...filasVale, ...items];
   const totalConIva = filas.reduce((s, i) => s + (Number(i.cantidad) || 0) * (Number(i.valorUnitario) || 0), 0);
   const sinIva = totalConIva / 1.21;
   const iva = totalConIva - sinIva;
@@ -734,7 +754,19 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
   // se respeta; si es un evento nuevo o se tocó la tarifa, se recalcula una sola vez al guardar.
   const valorSalonAplicar = ev.tarifaEspecialActiva ? (Number(ev.tarifaEspecial) || 0) : (Number(tarifaValor) || 0);
 
-  const guardar = () => onSave({ ...ev, salon: salonFinal, valorSalon: valorSalonAplicar });
+  // Mismo mecanismo, para el salón adicional (uso simultáneo de un segundo salón en el evento).
+  const salonAdicionalFinal = ev.salonAdicionalActivo ? (ev.salonAdicional === "Otro" ? ev.salonAdicionalOtro : ev.salonAdicional) : "";
+  const tarifaSalonAdicional = tarifas?.[salonAdicionalFinal];
+  const tarifaValorAdicional = ev.tarifaTipoAdicional === "completa" ? tarifaSalonAdicional?.completa : tarifaSalonAdicional?.media;
+  const valorSalonAdicionalAplicar = ev.tarifaEspecialActivaAdicional ? (Number(ev.tarifaEspecialAdicional) || 0) : (Number(tarifaValorAdicional) || 0);
+
+  const cantDias = fechasEvento(ev).length;
+
+  const guardar = () => onSave({
+    ...ev,
+    salon: salonFinal, valorSalon: valorSalonAplicar,
+    salonAdicional: salonAdicionalFinal, valorSalonAdicional: salonAdicionalFinal ? valorSalonAdicionalAplicar : "",
+  });
 
   return (
     <div className="p-5 rounded" style={{ background: CARD, border: `1px solid ${LINE}` }}>
@@ -812,7 +844,46 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
         </div>
         <p style={{ fontFamily: FONT_BODY, fontSize: 11, color: MUTED, marginTop: 6 }}>
           El valor de salón que quede aplicado (especial o de tarifario) se guarda tal cual con la ficha: si el tarifario general cambia más adelante, este evento ya realizado no se ve afectado.
+          {cantDias > 1 && ` Como el evento dura ${cantDias} días de salón (${fmtFecha(ev.fecha)} al ${fmtFecha(ev.fechaFin)}), la tarifa se cobra automáticamente ${cantDias} veces (una por día) — no hace falta cargarla a mano.`}
         </p>
+      </Field>
+
+      <Field label="Salón adicional (uso simultáneo de un segundo salón)">
+        <div className="p-2.5 rounded" style={{ background: HILITE_BG, border: `1px solid ${LINE}` }}>
+          <label className="flex items-center gap-1.5 mb-2">
+            <input type="checkbox" checked={!!ev.salonAdicionalActivo} onChange={e => set("salonAdicionalActivo", e.target.checked)} />
+            <span style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK, fontWeight: 600 }}>Este evento usa un salón más en simultáneo (ej: sala de reunión + salón de capacitación al mismo tiempo)</span>
+          </label>
+          {ev.salonAdicionalActivo && (
+            <>
+              <select style={inputStyle} value={ev.salonAdicional} onChange={e => set("salonAdicional", e.target.value)}>
+                <option value="">Elegir salón adicional…</option>
+                {SALONES_FIJOS.filter(s => s !== salonFinal).map(s => <option key={s} value={s}>{s}</option>)}
+                <option value="Otro">Otro…</option>
+              </select>
+              {ev.salonAdicional === "Otro" && <input style={{ ...inputStyle, marginTop: 8 }} placeholder="Nombre del salón adicional" value={ev.salonAdicionalOtro} onChange={e => set("salonAdicionalOtro", e.target.value)} />}
+              <div className="flex gap-3 items-center flex-wrap mt-2">
+                <label className="flex items-center gap-1.5"><input type="radio" disabled={ev.tarifaEspecialActivaAdicional} checked={ev.tarifaTipoAdicional === "completa"} onChange={() => set("tarifaTipoAdicional", "completa")} /><span style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK }}>Tarifa completa</span></label>
+                <label className="flex items-center gap-1.5"><input type="radio" disabled={ev.tarifaEspecialActivaAdicional} checked={ev.tarifaTipoAdicional === "media"} onChange={() => set("tarifaTipoAdicional", "media")} /><span style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK }}>Media tarifa</span></label>
+                {salonAdicionalFinal && !ev.tarifaEspecialActivaAdicional && (
+                  <span style={{ fontFamily: FONT_MONO, fontSize: 12.5, color: ACCENT, marginLeft: "auto" }}>
+                    {tarifaValorAdicional ? `$ ${fmtMoney(tarifaValorAdicional)}` : "Sin tarifa configurada en Ajustes"}
+                  </span>
+                )}
+              </div>
+              <label className="flex items-center gap-1.5 mt-2">
+                <input type="checkbox" checked={!!ev.tarifaEspecialActivaAdicional} onChange={e => set("tarifaEspecialActivaAdicional", e.target.checked)} />
+                <span style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK, fontWeight: 600 }}>Usar tarifa especial para el salón adicional</span>
+              </label>
+              {ev.tarifaEspecialActivaAdicional && (
+                <input type="number" style={{ ...inputStyle, marginTop: 6 }} value={ev.tarifaEspecialAdicional} onChange={e => set("tarifaEspecialAdicional", e.target.value)} placeholder="Valor especial del salón adicional $ (precio final, con IVA incluido)" />
+              )}
+              <p style={{ fontFamily: FONT_BODY, fontSize: 11, color: MUTED, marginTop: 6 }}>
+                Se suma solo en la cotización, con la misma cantidad de días que el salón principal{cantDias > 1 ? ` (${cantDias} días)` : ""}.
+              </p>
+            </>
+          )}
+        </div>
       </Field>
 
       <Field label="Incluye (catering / comida)">
@@ -919,10 +990,19 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
           <tbody>
             {salonFinal && (
               <tr style={{ borderBottom: `1px solid ${LINE}`, opacity: 0.85 }}>
-                <td className="py-1">Salón ({salonFinal}) — automático</td>
-                <td className="text-right py-1">1</td>
+                <td className="py-1">Salón ({salonFinal}) — automático{cantDias > 1 ? ` (${cantDias} días)` : ""}</td>
+                <td className="text-right py-1">{cantDias}</td>
                 <td className="text-right py-1">$ {fmtMoney(valorSalonAplicar)}</td>
-                <td className="text-right py-1">$ {fmtMoney(valorSalonAplicar)}</td>
+                <td className="text-right py-1">$ {fmtMoney(valorSalonAplicar * cantDias)}</td>
+                <td></td>
+              </tr>
+            )}
+            {salonAdicionalFinal && (
+              <tr style={{ borderBottom: `1px solid ${LINE}`, opacity: 0.85 }}>
+                <td className="py-1">Salón adicional ({salonAdicionalFinal}) — automático{cantDias > 1 ? ` (${cantDias} días)` : ""}</td>
+                <td className="text-right py-1">{cantDias}</td>
+                <td className="text-right py-1">$ {fmtMoney(valorSalonAdicionalAplicar)}</td>
+                <td className="text-right py-1">$ {fmtMoney(valorSalonAdicionalAplicar * cantDias)}</td>
                 <td></td>
               </tr>
             )}
@@ -946,7 +1026,7 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
             ))}
             <tr>
               <td className="py-1 font-semibold" colSpan={3}>TOTAL (con IVA incluido)</td>
-              <td className="text-right py-1 font-semibold">$ {fmtMoney(totalItemsEvento(ev, valorSalonAplicar).totalConIva)}</td>
+              <td className="text-right py-1 font-semibold">$ {fmtMoney(totalItemsEvento(ev, { principal: valorSalonAplicar, adicional: valorSalonAdicionalAplicar }).totalConIva)}</td>
               <td></td>
             </tr>
           </tbody>
@@ -972,7 +1052,7 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
         </div>
 
         {(() => {
-          const { sinIva, iva, totalConIva } = totalItemsEvento(ev, valorSalonAplicar);
+          const { sinIva, iva, totalConIva } = totalItemsEvento(ev, { principal: valorSalonAplicar, adicional: valorSalonAdicionalAplicar });
           return (
             <div className="p-2.5 rounded mb-3" style={{ background: CARD, border: `1px solid ${LINE}` }}>
               <p style={{ fontFamily: FONT_MONO, fontSize: 12.5, color: INK, marginBottom: 2 }}>Total cargado (precio final, con IVA incluido): $ {fmtMoney(totalConIva)}</p>
@@ -1028,7 +1108,7 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
         </div>
 
         {(ev.estadoPago === "parcial" || ev.estadoPago === "sena") && (() => {
-          const { totalConIva } = totalItemsEvento(ev, valorSalonAplicar);
+          const { totalConIva } = totalItemsEvento(ev, { principal: valorSalonAplicar, adicional: valorSalonAdicionalAplicar });
           return (
             <div className="mt-3 p-3 rounded" style={{ background: PARCIAL_BG, border: `1px solid ${PARCIAL}` }}>
               <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: PARCIAL, marginBottom: 10, fontWeight: 600 }}>
@@ -1227,14 +1307,15 @@ function FichaCompleta({ ev, jefeAreas, isAdmin, onEdit, onVaucher, onCronograma
       <div className="flex items-start justify-between mb-3">
         <div>
           {ev.colorEvento && <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: "50%", background: ev.colorEvento, marginRight: 6 }} />}
-          <p style={{ fontFamily: FONT_BODY, fontSize: 13, color: MUTED }}>{ev.salon || "Sin salón"} · {fmtRangoFecha(ev)} · {ev.horaInicio}–{ev.horaFin} · {ev.personas || "?"} personas</p>
+          <p style={{ fontFamily: FONT_BODY, fontSize: 13, color: MUTED }}>{ev.salon || "Sin salón"}{ev.salonAdicional ? ` + ${ev.salonAdicional}` : ""} · {fmtRangoFecha(ev)} · {ev.horaInicio}–{ev.horaFin} · {ev.personas || "?"} personas</p>
         </div>
         <Stamp estadoPago={ev.estadoPago} />
       </div>
 
       {ev.servicio && <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}><b>Concepto:</b> {ev.servicio}</p>}
       {checklistTexto(ev) && <p style={{ fontFamily: FONT_BODY, fontSize: 13, color: MUTED, marginBottom: 6 }}>{checklistTexto(ev)}</p>}
-      {ev.tarifaTipo && <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}><b>Tarifa:</b> {ev.tarifaTipo === "completa" ? "Completa" : "Media tarifa"}{ev.tarifaEspecialActiva ? " (tarifa especial aplicada)" : ""}</p>}
+      {ev.tarifaTipo && <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}><b>Tarifa:</b> {ev.tarifaTipo === "completa" ? "Completa" : "Media tarifa"}{ev.tarifaEspecialActiva ? " (tarifa especial aplicada)" : ""}{esMultiDia(ev) ? ` · ${fechasEvento(ev).length} días de salón` : ""}</p>}
+      {ev.salonAdicional && <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}><b>Salón adicional:</b> {ev.salonAdicional} — {ev.tarifaTipoAdicional === "completa" ? "Completa" : "Media tarifa"}{ev.tarifaEspecialActivaAdicional ? " (tarifa especial aplicada)" : ""}</p>}
       {(ev.horaArmado || ev.horaDesarme) && (
         <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}>
           {ev.horaArmado && <><b>Armado:</b> {ev.horaArmado} </>}{ev.horaDesarme && <><b>· Desarme:</b> {ev.horaDesarme}</>}
@@ -1538,12 +1619,12 @@ function Voucher({ ev, onBack }) {
         <PrintHeader eyebrow="Orden de evento" titulo={ev.nombreEvento || ev.salon || "Salón a confirmar"} />
         <div className="flex justify-end -mt-2 mb-3"><Stamp estadoPago={ev.estadoPago} /></div>
         <div className="grid grid-cols-2 gap-y-2 gap-x-6 mb-4" style={{ fontFamily: FONT_BODY, fontSize: 13.5, color: INK }}>
-          <p><b>Salón:</b> {ev.salon || "-"}</p>
+          <p><b>Salón:</b> {ev.salon || "-"}{ev.salonAdicional ? ` + ${ev.salonAdicional}` : ""}</p>
           <p><b>Fecha:</b> {fmtRangoFecha(ev)}</p>
           <p><b>Horario:</b> {ev.horaInicio} a {ev.horaFin}</p>
           <p><b>Personas:</b> {ev.personas || "-"}</p>
           <p><b>Concepto:</b> {ev.servicio || "-"}</p>
-          <p><b>Tarifa:</b> {ev.tarifaTipo === "completa" ? "Completa" : "Media tarifa"}</p>
+          <p><b>Tarifa:</b> {ev.tarifaTipo === "completa" ? "Completa" : "Media tarifa"}{esMultiDia(ev) ? ` (${fechasEvento(ev).length} días)` : ""}</p>
         </div>
         {checklistTexto(ev) && <p style={{ fontFamily: FONT_BODY, fontSize: 13.5, color: MUTED, marginBottom: 10 }}>{checklistTexto(ev)}</p>}
         <div className="p-3 mb-4" style={{ background: HILITE_BG, fontFamily: FONT_BODY, fontSize: 13.5, color: INK }}>
@@ -2358,7 +2439,7 @@ function BuscadorEventos({ events, onOpenEvent }) {
 /* ============================================================
    AJUSTES (solo admin)
    ============================================================ */
-function Settings({ jefeAreas, setJefeAreas, tarifas, setTarifas, floorplans, setFloorplans, events, onImportEvents }) {
+function Settings({ jefeAreas, setJefeAreas, tarifas, setTarifas, floorplans, setFloorplans, events, onImportEvents, onMarkPastAsPaid }) {
   const [nuevoSalon, setNuevoSalon] = useState("");
   const [tab, setTab] = useState("tarifas");
 
@@ -2376,8 +2457,12 @@ function Settings({ jefeAreas, setJefeAreas, tarifas, setTarifas, floorplans, se
     ["planos", "Planos"],
     ["jefeareas", "Jefe de Áreas"],
     ["importar", "Importar"],
+    ["notificaciones", "Notificaciones"],
     ["backup", "Backup"],
   ];
+
+  const hoyISO = toISO(new Date());
+  const eventosPasadosSinPagar = events.filter(e => (e.fechaFin || e.fecha) < hoyISO && e.estadoPago !== "total");
 
   const exportarBackup = () => {
     const backup = {
@@ -2481,6 +2566,34 @@ function Settings({ jefeAreas, setJefeAreas, tarifas, setTarifas, floorplans, se
         <ImportICS onImport={(nuevos) => onImportEvents(nuevos)} />
       )}
 
+      {tab === "notificaciones" && (
+        <div className="p-5 rounded" style={{ background: CARD, border: `1px solid ${LINE}` }}>
+          <h3 style={{ fontFamily: FONT_HEAD, fontSize: 20, color: INK, marginBottom: 12 }}>Notificaciones</h3>
+          <p style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: MUTED, marginBottom: 16 }}>
+            Las alertas de pago que aparecen al abrir la app ahora quedan guardadas cuando las cerrás con la "×": no van a volver a aparecer. Para eventos viejos importados del calendario que ya pasaron y no vas a actualizar, usá esta herramienta para marcarlos todos como pagados de una sola vez, en lugar de cerrarlos uno por uno.
+          </p>
+          <div className="p-3 rounded" style={{ background: HILITE_BG, border: `1px solid ${LINE}` }}>
+            <p style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK, marginBottom: 10 }}>
+              {eventosPasadosSinPagar.length > 0
+                ? `Hay ${eventosPasadosSinPagar.length} evento(s) que ya pasaron y siguen marcados como sin pago total.`
+                : "No hay eventos pasados pendientes de pago: todo al día."}
+            </p>
+            {eventosPasadosSinPagar.length > 0 && (
+              <button
+                onClick={onMarkPastAsPaid}
+                className="px-3 py-2 rounded text-sm font-medium"
+                style={{ background: INK_SOFT, color: PAPER, fontFamily: FONT_BODY }}
+              >
+                Marcar los {eventosPasadosSinPagar.length} evento(s) pasados como pagados
+              </button>
+            )}
+            <p style={{ fontFamily: FONT_BODY, fontSize: 11, color: MUTED, marginTop: 8 }}>
+              Esto solo cambia el estado de pago a "Pagado en su totalidad" para eventos cuya fecha (o última fecha, si duraron varios días) ya pasó. Los eventos de hoy o futuros no se tocan.
+            </p>
+          </div>
+        </div>
+      )}
+
       {tab === "backup" && (
         <div className="p-5 rounded" style={{ background: CARD, border: `1px solid ${LINE}` }}>
           <h3 style={{ fontFamily: FONT_HEAD, fontSize: 20, color: INK, marginBottom: 12 }}>Backup manual</h3>
@@ -2564,14 +2677,15 @@ export default function App() {
 
   useEffect(() => {
     (async () => {
-      const [ev, jefe, cfg, planos, tar] = await Promise.all([
+      const [ev, jefe, cfg, planos, tar, ocultas] = await Promise.all([
         loadShared("eventos", []),
         loadShared("jefeAreas", { telefono: "" }),
         loadShared("config", { pin: null, proximoVale: 1 }),
         loadShared("planos", {}),
         loadShared("tarifas", {}),
+        loadShared("alertasOcultas", []),
       ]);
-      setEvents(ev); setJefeAreas(jefe); setPin(cfg.pin); setProximoVale(cfg.proximoVale || 1); setFloorplans(planos); setTarifas(tar);
+      setEvents(ev); setJefeAreas(jefe); setPin(cfg.pin); setProximoVale(cfg.proximoVale || 1); setFloorplans(planos); setTarifas(tar); setAlertasOcultas(ocultas);
       setReady(true);
     })();
   }, []);
@@ -2580,6 +2694,9 @@ export default function App() {
   useEffect(() => { if (ready) saveShared("jefeAreas", jefeAreas); }, [jefeAreas, ready]);
   useEffect(() => { if (ready) saveShared("planos", floorplans); }, [floorplans, ready]);
   useEffect(() => { if (ready) saveShared("tarifas", tarifas); }, [tarifas, ready]);
+  // Las notificaciones que la persona ya descartó (tocando la "×") se guardan acá, para que
+  // no vuelvan a aparecer cada vez que se abre la app.
+  useEffect(() => { if (ready) saveShared("alertasOcultas", alertasOcultas); }, [alertasOcultas, ready]);
 
   const setPinIfEmpty = (p) => { setPin(p); saveShared("config", { pin: p, proximoVale }); };
 
@@ -2600,6 +2717,17 @@ export default function App() {
     setEvents(prev => prev.filter(e => e.id !== id));
     setSelectedEvent(null); setEditingEvent(null); setView("calendario");
     showToast("Evento eliminado");
+  };
+  // Herramienta de Ajustes → Notificaciones: marca de una sola vez todos los eventos que ya
+  // pasaron y siguen sin pago total (típicamente eventos viejos importados del calendario que
+  // no se van a actualizar a mano). No toca eventos de hoy o futuros.
+  const handleMarkPastAsPaid = () => {
+    const hoyISO = toISO(new Date());
+    const cantidad = events.filter(e => (e.fechaFin || e.fecha) < hoyISO && e.estadoPago !== "total").length;
+    if (cantidad === 0) return;
+    if (!window.confirm(`¿Marcar ${cantidad} evento(s) pasados como "pagado en su totalidad"? Esta acción no se puede deshacer fácilmente.`)) return;
+    setEvents(prev => prev.map(e => ((e.fechaFin || e.fecha) < hoyISO && e.estadoPago !== "total") ? { ...e, estadoPago: "total" } : e));
+    showToast(`${cantidad} evento(s) marcados como pagados ✓`);
   };
   const handleSavePlano = (dataUrl) => {
     setEvents(prev => prev.map(e => e.id === selectedEvent.id ? { ...e, planoDibujo: dataUrl } : e));
@@ -2654,6 +2782,15 @@ export default function App() {
       <main className="max-w-3xl mx-auto px-5 py-6">
         {isAdmin && alertas.length > 0 && (
           <div className="no-print flex flex-col gap-2 mb-5">
+            <div className="flex justify-end">
+              <button
+                onClick={() => setAlertasOcultas(prev => [...prev, ...alertas.map(a => a.id)])}
+                className="text-xs font-medium"
+                style={{ fontFamily: FONT_BODY, color: MUTED, textDecoration: "underline", background: "none", border: "none", cursor: "pointer" }}
+              >
+                Borrar todas ({alertas.length})
+              </button>
+            </div>
             {alertas.map(a => (
               <div key={a.id} className="p-3 rounded flex items-start justify-between gap-3"
                 style={{ background: a.urgente ? PENDIENTE_BG : PARCIAL_BG, border: `1px solid ${a.urgente ? PENDIENTE : PARCIAL}` }}>
@@ -2664,7 +2801,18 @@ export default function App() {
                 >
                   {a.texto}
                 </button>
-                <button onClick={() => setAlertasOcultas(prev => [...prev, a.id])} style={{ color: MUTED, fontSize: 16, lineHeight: 1, fontFamily: FONT_BODY }}>×</button>
+                <div className="flex items-center gap-2">
+                  {a.id.startsWith("pago-") && (
+                    <button
+                      onClick={() => setEvents(prev => prev.map(e => e.id === a.ev.id ? { ...e, estadoPago: "total" } : e))}
+                      className="text-xs px-2 py-1 rounded"
+                      style={{ fontFamily: FONT_BODY, color: INK, border: `1px solid ${LINE}`, background: CARD, whiteSpace: "nowrap" }}
+                    >
+                      Marcar pagado
+                    </button>
+                  )}
+                  <button onClick={() => setAlertasOcultas(prev => [...prev, a.id])} style={{ color: MUTED, fontSize: 16, lineHeight: 1, fontFamily: FONT_BODY }}>×</button>
+                </div>
               </div>
             ))}
           </div>
@@ -2753,6 +2901,7 @@ export default function App() {
             tarifas={tarifas} setTarifas={setTarifas}
             floorplans={floorplans} setFloorplans={setFloorplans}
             events={events} onImportEvents={(nuevos) => setEvents(prev => [...prev, ...nuevos])}
+            onMarkPastAsPaid={handleMarkPastAsPaid}
           />
         )}
       </main>

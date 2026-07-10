@@ -99,6 +99,13 @@ function eventoEnDia(ev, iso) {
   return iso >= ev.fecha && iso <= ev.fechaFin;
 }
 function esMultiDia(ev) { return !!ev.fechaFin && ev.fechaFin > ev.fecha; }
+// Cantidad de días entre hoy y una fecha ISO (positivo = futuro, 0 = hoy, negativo = ya pasó).
+function diasHasta(fechaISO) {
+  if (!fechaISO) return null;
+  const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+  const f = fromISO(fechaISO); f.setHours(0, 0, 0, 0);
+  return Math.round((f - hoy) / 86400000);
+}
 // Formato lindo del rango de fechas: "14 al 18 de agosto" (o "30 de julio al 2 de agosto" si cruza de mes).
 function fmtRangoFecha(ev) {
   if (!esMultiDia(ev)) return fmtFecha(ev.fecha);
@@ -324,6 +331,7 @@ function blankEvent(fecha) {
     notificarJefeAreas: false,
     notas: "",
     controlInterno: "",
+    recordatorios: [], // avisos personalizados: [{ id, texto, diasAntes }]
   };
 }
 
@@ -635,6 +643,10 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
   const setVale = (k, v) => setEv(prev => ({ ...prev, vale: { ...prev.vale, [k]: v } }));
   const setComanda = (k, v) => setEv(prev => ({ ...prev, comanda: { ...prev.comanda, [k]: v } }));
 
+  const registrarHistorial = (accion) => {
+    setEv(prev => ({ ...prev, historial: [...(prev.historial || []), { id: uid(), fecha: new Date().toISOString(), accion }] }));
+  };
+
   const setContacto = (idx, campo, valor) => setEv(prev => ({ ...prev, contactos: prev.contactos.map((c, i) => i === idx ? { ...c, [campo]: valor } : c) }));
   const agregarContacto = () => setEv(prev => ({ ...prev, contactos: [...prev.contactos, { nombre: "", via: "" }] }));
   const quitarContacto = (idx) => setEv(prev => ({ ...prev, contactos: prev.contactos.filter((_, i) => i !== idx) }));
@@ -643,9 +655,15 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
   const agregarFactura = () => {
     if (!nuevaFactura.numero.trim() && !nuevaFactura.monto) return;
     setEv(prev => ({ ...prev, facturas: [...(prev.facturas || []), { id: uid(), ...nuevaFactura }] }));
+    registrarHistorial(`Agregó factura ${nuevaFactura.numero || "(sin número)"}${nuevaFactura.monto ? ` por $ ${fmtMoney(Number(nuevaFactura.monto))}` : ""}`);
     setNuevaFactura({ numero: "", monto: "", fecha: "", link: "", retenciones: "no" });
   };
-  const quitarFactura = (id) => setEv(prev => ({ ...prev, facturas: prev.facturas.filter(f => f.id !== id) }));
+  const quitarFactura = (id) => {
+    if (!window.confirm("¿Seguro que querés quitar esta factura?")) return;
+    const f = (ev.facturas || []).find(x => x.id === id);
+    setEv(prev => ({ ...prev, facturas: prev.facturas.filter(f => f.id !== id) }));
+    if (f) registrarHistorial(`Quitó factura ${f.numero || "(sin número)"}${f.monto ? ` por $ ${fmtMoney(Number(f.monto))}` : ""}`);
+  };
 
   const [nuevoHuesped, setNuevoHuesped] = useState("");
   const agregarHuesped = () => {
@@ -666,9 +684,15 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
   const agregarTipoCubierto = () => {
     if (!nuevoTipoCubierto.cantidad || !nuevoTipoCubierto.valorUnitario) return;
     setVale("tipos", [...(ev.vale.tipos || []), { id: uid(), ...nuevoTipoCubierto }]);
+    registrarHistorial(`Agregó al vale: ${nuevoTipoCubierto.cantidad} × ${nuevoTipoCubierto.tipo} a $ ${fmtMoney(Number(nuevoTipoCubierto.valorUnitario))} c/u`);
     setNuevoTipoCubierto({ tipo: VALE_TIPOS[0], cantidad: "", valorUnitario: "" });
   };
-  const quitarTipoCubierto = (id) => setVale("tipos", (ev.vale.tipos || []).filter(t => t.id !== id));
+  const quitarTipoCubierto = (id) => {
+    if (!window.confirm("¿Seguro que querés quitar este ítem del vale?")) return;
+    const t = (ev.vale.tipos || []).find(x => x.id === id);
+    setVale("tipos", (ev.vale.tipos || []).filter(t => t.id !== id));
+    if (t) registrarHistorial(`Quitó del vale: ${t.cantidad} × ${t.tipo} a $ ${fmtMoney(Number(t.valorUnitario))} c/u`);
+  };
 
   const [nuevoItemComanda, setNuevoItemComanda] = useState({ nombre: "", detalle: "", cantidad: "" });
   const agregarItemComanda = () => {
@@ -692,6 +716,14 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
   };
   const quitarCronograma = (id) => setEv(prev => ({ ...prev, cronograma: prev.cronograma.filter(c => c.id !== id) }));
   const cronoOrdenado = (ev.cronograma || []).slice().sort((a, b) => (a.hora || "").localeCompare(b.hora || ""));
+
+  const [nuevoRecordatorio, setNuevoRecordatorio] = useState({ texto: "", diasAntes: "2" });
+  const agregarRecordatorio = () => {
+    if (!nuevoRecordatorio.texto.trim()) return;
+    setEv(prev => ({ ...prev, recordatorios: [...(prev.recordatorios || []), { id: uid(), texto: nuevoRecordatorio.texto.trim(), diasAntes: nuevoRecordatorio.diasAntes || "0" }] }));
+    setNuevoRecordatorio({ texto: "", diasAntes: "2" });
+  };
+  const quitarRecordatorio = (id) => setEv(prev => ({ ...prev, recordatorios: (prev.recordatorios || []).filter(r => r.id !== id) }));
 
   const salonFinal = ev.salon === "Otro" ? ev.salonOtro : ev.salon;
   const tarifaSalon = tarifas?.[salonFinal];
@@ -1134,6 +1166,32 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
         <Toggle checked={ev.notificarJefeAreas} onChange={v => set("notificarJefeAreas", v)} label="Notificar a Jefe de Áreas por WhatsApp" />
       </Field>
 
+      <div className="p-3 rounded mb-4" style={{ background: HILITE_BG, border: `1px solid ${LINE}` }}>
+        <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: MUTED, marginBottom: 6, fontWeight: 600 }}>Recordatorios personalizados</p>
+        <p style={{ fontFamily: FONT_BODY, fontSize: 11.5, color: MUTED, marginBottom: 10 }}>
+          Avisos puntuales de este evento (ej: "Alquilar vajilla" — avisar 2 días antes). Aparecen en el cartel de alertas al abrir la app, desde ese número de días antes y hasta el día del evento.
+        </p>
+        {(ev.recordatorios || []).length > 0 && (
+          <div className="flex flex-col gap-1.5 mb-3">
+            {ev.recordatorios.map(r => (
+              <div key={r.id} className="flex items-center justify-between p-2 rounded" style={{ background: CARD }}>
+                <span style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK }}>{r.texto} — avisar {r.diasAntes} día{Number(r.diasAntes) === 1 ? "" : "s"} antes</span>
+                <button type="button" onClick={() => quitarRecordatorio(r.id)} style={{ color: PENDIENTE, fontSize: 11, fontFamily: FONT_BODY }}>Quitar</button>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="grid grid-cols-4 gap-2 items-end">
+          <div className="col-span-3">
+            <Field label="Qué hay que hacer / recordar">
+              <input style={inputStyle} value={nuevoRecordatorio.texto} onChange={e => setNuevoRecordatorio(p => ({ ...p, texto: e.target.value }))} placeholder="Ej: Alquilar vajilla" />
+            </Field>
+          </div>
+          <Field label="Días antes"><input type="number" min="0" style={inputStyle} value={nuevoRecordatorio.diasAntes} onChange={e => setNuevoRecordatorio(p => ({ ...p, diasAntes: e.target.value }))} /></Field>
+        </div>
+        <button type="button" onClick={agregarRecordatorio} className="px-3 py-2 rounded text-sm mt-2" style={{ background: INK_SOFT, color: PAPER, fontFamily: FONT_BODY }}>+ Agregar recordatorio</button>
+      </div>
+
       <Field label="Notas"><textarea style={{ ...inputStyle, minHeight: 60 }} value={ev.notas} onChange={e => set("notas", e.target.value)} /></Field>
 
       <Field label="Control interno (checklist / seguimiento, no aparece en el vaucher)">
@@ -1324,6 +1382,19 @@ function FichaCompleta({ ev, jefeAreas, isAdmin, onEdit, onVaucher, onCronograma
         <p style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK }}><b>Notas para cocina:</b> {ev.comanda?.detalle || "-"}</p>
       </div>
 
+      {isAdmin && (ev.historial || []).length > 0 && (
+        <div className="p-3 rounded mb-4" style={{ background: HILITE_BG, border: `1px solid ${LINE}` }}>
+          <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: MUTED, marginBottom: 8, fontWeight: 600 }}>Historial de cambios (factura / vale)</p>
+          <div className="flex flex-col gap-1.5">
+            {ev.historial.slice().reverse().map(h => (
+              <p key={h.id} style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: INK }}>
+                <span style={{ fontFamily: FONT_MONO, color: MUTED }}>{new Date(h.fecha).toLocaleString("es-AR")}</span> — {h.accion}
+              </p>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* ---- Cronograma completo (horario a horario) ---- */}
       <div className="p-3 rounded mb-4" style={{ background: HILITE_BG, border: `1px solid ${LINE}` }}>
         <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: MUTED, marginBottom: 8, fontWeight: 600 }}>Cronograma</p>
@@ -1410,6 +1481,7 @@ function Voucher({ ev, onBack }) {
   const saldo = totalConIva - pagado;
   const voucherRef = useRef(null);
   const [generandoImagen, setGenerandoImagen] = useState(false);
+  const [generandoPDF, setGenerandoPDF] = useState(false);
 
   const descargarImagen = async () => {
     if (!voucherRef.current) return;
@@ -1430,12 +1502,35 @@ function Voucher({ ev, onBack }) {
     }
   };
 
+  const descargarPDF = async () => {
+    if (!voucherRef.current) return;
+    setGenerandoPDF(true);
+    try {
+      const html2canvas = (await import("html2canvas")).default;
+      const { jsPDF } = await import("jspdf");
+      const canvas = await html2canvas(voucherRef.current, { scale: 2, backgroundColor: "#ffffff", useCORS: true });
+      const imgData = canvas.toDataURL("image/jpeg", 0.95);
+      const pdf = new jsPDF({ orientation: canvas.width >= canvas.height ? "landscape" : "portrait", unit: "px", format: [canvas.width, canvas.height] });
+      pdf.addImage(imgData, "JPEG", 0, 0, canvas.width, canvas.height);
+      const nombreArchivo = (ev.nombreEvento || ev.salon || "evento").replace(/[^\w\-]+/g, "_");
+      pdf.save(`Voucher_${nombreArchivo}.pdf`);
+    } catch (err) {
+      alert("No se pudo generar el PDF. Verificá que el paquete 'jspdf' esté instalado (npm install jspdf).");
+      console.error(err);
+    } finally {
+      setGenerandoPDF(false);
+    }
+  };
+
   return (
     <div>
       <div className="no-print flex gap-2 mb-4 flex-wrap">
         <button onClick={() => window.print()} className="px-4 py-2 rounded text-sm font-medium" style={{ background: INK_SOFT, color: PAPER, fontFamily: FONT_BODY }}>Imprimir / Guardar PDF</button>
         <button onClick={descargarImagen} disabled={generandoImagen} className="px-4 py-2 rounded text-sm font-medium" style={{ background: ACCENT, color: "#fff", fontFamily: FONT_BODY, opacity: generandoImagen ? 0.7 : 1 }}>
           {generandoImagen ? "Generando…" : "Descargar como imagen (para mail)"}
+        </button>
+        <button onClick={descargarPDF} disabled={generandoPDF} className="px-4 py-2 rounded text-sm font-medium" style={{ border: `1px solid ${ACCENT}`, color: ACCENT, fontFamily: FONT_BODY, opacity: generandoPDF ? 0.7 : 1 }}>
+          {generandoPDF ? "Generando…" : "Descargar como PDF"}
         </button>
         <button onClick={onBack} className="px-4 py-2 rounded text-sm font-medium" style={{ border: `1px solid ${LINE}`, color: INK, fontFamily: FONT_BODY }}>Volver</button>
       </div>
@@ -2209,6 +2304,58 @@ function BuscadorPorEmpresa({ events }) {
 }
 
 /* ============================================================
+   BUSCADOR GENERAL — por nombre de evento, salón o fecha.
+   ============================================================ */
+function BuscadorEventos({ events, onOpenEvent }) {
+  const [q, setQ] = useState("");
+  const query = q.trim().toLowerCase();
+
+  const resultados = useMemo(() => {
+    if (!query) return [];
+    return events
+      .filter(e => {
+        const campos = [e.nombreEvento, e.salon, e.servicio, e.fecha, e.fechaFin]
+          .filter(Boolean)
+          .map(v => String(v).toLowerCase());
+        return campos.some(c => c.includes(query));
+      })
+      .sort((a, b) => (b.fecha || "").localeCompare(a.fecha || ""));
+  }, [events, query]);
+
+  return (
+    <div className="p-6 rounded" style={{ background: CARD, border: `1px solid ${LINE}` }}>
+      <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: MUTED, marginBottom: 10 }}>
+        Buscar evento por nombre, salón o fecha (AAAA-MM-DD)
+      </p>
+      <input
+        style={inputStyle}
+        value={q}
+        onChange={e => setQ(e.target.value)}
+        placeholder="Ej: Cumpleaños Sofía, Salón Roble, 2026-08-15..."
+      />
+
+      {query && !resultados.length && (
+        <p className="mt-3" style={{ fontFamily: FONT_BODY, fontSize: 13, color: MUTED }}>No se encontraron eventos que coincidan con "{q}".</p>
+      )}
+
+      {resultados.length > 0 && (
+        <div className="flex flex-col gap-2 mt-3">
+          {resultados.map(e => (
+            <button key={e.id} onClick={() => onOpenEvent(e)} className="p-2.5 rounded flex items-center justify-between text-left w-full" style={{ background: HILITE_BG }}>
+              <div>
+                <div style={{ fontFamily: FONT_BODY, fontWeight: 600, color: INK, fontSize: 13.5 }}>{e.nombreEvento || e.salon || "Sin nombre"}</div>
+                <div style={{ fontFamily: FONT_BODY, fontSize: 12, color: MUTED }}>{fmtRangoFecha(e)} · {e.salon || "Sin salón"}</div>
+              </div>
+              <Stamp estadoPago={e.estadoPago} />
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
    AJUSTES (solo admin)
    ============================================================ */
 function Settings({ jefeAreas, setJefeAreas, tarifas, setTarifas, floorplans, setFloorplans, events, onImportEvents }) {
@@ -2229,7 +2376,25 @@ function Settings({ jefeAreas, setJefeAreas, tarifas, setTarifas, floorplans, se
     ["planos", "Planos"],
     ["jefeareas", "Jefe de Áreas"],
     ["importar", "Importar"],
+    ["backup", "Backup"],
   ];
+
+  const exportarBackup = () => {
+    const backup = {
+      exportadoEl: new Date().toISOString(),
+      eventos: events,
+      jefeAreas,
+      tarifas,
+      floorplans,
+    };
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `backup-carmela-planner-${toISO(new Date())}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <div className="flex flex-col gap-4">
@@ -2315,6 +2480,21 @@ function Settings({ jefeAreas, setJefeAreas, tarifas, setTarifas, floorplans, se
       {tab === "importar" && (
         <ImportICS onImport={(nuevos) => onImportEvents(nuevos)} />
       )}
+
+      {tab === "backup" && (
+        <div className="p-5 rounded" style={{ background: CARD, border: `1px solid ${LINE}` }}>
+          <h3 style={{ fontFamily: FONT_HEAD, fontSize: 20, color: INK, marginBottom: 12 }}>Backup manual</h3>
+          <p style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: MUTED, marginBottom: 16 }}>
+            Descarga un archivo .json con todos los eventos cargados, tarifas, planos y el contacto de Jefe de Áreas. Sirve como copia de seguridad propia o por si algún día hace falta migrar de Supabase a otro sistema. Guardalo en Drive o donde prefieras — no se sube a ningún lado automáticamente.
+          </p>
+          <button onClick={exportarBackup} className="px-4 py-2 rounded text-sm font-medium" style={{ background: INK_SOFT, color: PAPER, fontFamily: FONT_BODY }}>
+            Descargar backup (.json)
+          </button>
+          <p style={{ fontFamily: FONT_BODY, fontSize: 11.5, color: MUTED, marginTop: 10 }}>
+            {events.length} evento{events.length === 1 ? "" : "s"} cargado{events.length === 1 ? "" : "s"} actualmente.
+          </p>
+        </div>
+      )}
     </div>
   );
 }
@@ -2338,6 +2518,49 @@ export default function App() {
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [editingEvent, setEditingEvent] = useState(null);
   const [newEventDate, setNewEventDate] = useState(null);
+  const [toast, setToast] = useState(null);
+  const toastTimer = useRef(null);
+  const showToast = (msg) => {
+    setToast(msg);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 2600);
+  };
+  const [alertasOcultas, setAlertasOcultas] = useState([]);
+
+  const alertas = useMemo(() => {
+    const lista = [];
+    events.forEach(e => {
+      const dias = diasHasta(e.fecha);
+      if (dias === null) return;
+      const sinPagar = e.estadoPago !== "total";
+      if (sinPagar && dias <= 2) {
+        lista.push({
+          id: `pago-${e.id}`,
+          ev: e,
+          urgente: dias < 0,
+          texto: dias < 0
+            ? `"${e.nombreEvento || e.salon || "Evento"}" ya pasó (hace ${Math.abs(dias)} día${Math.abs(dias) === 1 ? "" : "s"}) y sigue sin pago total.`
+            : dias === 0
+              ? `"${e.nombreEvento || e.salon || "Evento"}" es HOY y no está pagado en su totalidad.`
+              : `"${e.nombreEvento || e.salon || "Evento"}" es en ${dias} día${dias === 1 ? "" : "s"} y no está pagado en su totalidad.`,
+        });
+      }
+      (e.recordatorios || []).forEach(r => {
+        const diasAntes = Number(r.diasAntes) || 0;
+        if (dias >= 0 && dias <= diasAntes) {
+          lista.push({
+            id: `rec-${r.id}`,
+            ev: e,
+            urgente: dias === 0,
+            texto: `"${e.nombreEvento || e.salon || "Evento"}" (${dias === 0 ? "hoy" : `en ${dias} día${dias === 1 ? "" : "s"}`}): ${r.texto}`,
+          });
+        }
+      });
+    });
+    return lista
+      .filter(a => !alertasOcultas.includes(a.id))
+      .sort((a, b) => (a.urgente === b.urgente ? 0 : a.urgente ? -1 : 1));
+  }, [events, alertasOcultas]);
 
   useEffect(() => {
     (async () => {
@@ -2370,10 +2593,13 @@ export default function App() {
       return exists ? prev.map(e => e.id === ev.id ? ev : e) : [...prev, ev];
     });
     setSelectedEvent(ev); setEditingEvent(null); setNewEventDate(null); setView("ficha");
+    showToast("Ficha guardada ✓");
   };
   const handleDeleteEvent = (id) => {
+    if (!window.confirm("¿Seguro que querés eliminar este evento? Esta acción no se puede deshacer.")) return;
     setEvents(prev => prev.filter(e => e.id !== id));
     setSelectedEvent(null); setEditingEvent(null); setView("calendario");
+    showToast("Evento eliminado");
   };
   const handleSavePlano = (dataUrl) => {
     setEvents(prev => prev.map(e => e.id === selectedEvent.id ? { ...e, planoDibujo: dataUrl } : e));
@@ -2415,8 +2641,8 @@ export default function App() {
 
       <nav className="no-print px-5 py-3 flex gap-4 flex-wrap" style={{ background: CARD, borderBottom: `1px solid ${LINE}` }}>
         {(isAdmin
-          ? [["calendario", "Mes"], ["semana", "Semana"], ["estadisticas", "Estadísticas"], ["ajustes", "Ajustes"]]
-          : [["calendario", "Mes"], ["semana", "Semana"], ["estadisticas", "Estadísticas"]]
+          ? [["calendario", "Mes"], ["semana", "Semana"], ["buscar", "Buscar"], ["estadisticas", "Estadísticas"], ["ajustes", "Ajustes"]]
+          : [["calendario", "Mes"], ["semana", "Semana"], ["buscar", "Buscar"], ["estadisticas", "Estadísticas"]]
         ).map(([key, label]) => (
           <button key={key} onClick={() => setView(key)} className="text-sm font-medium pb-1"
             style={{ fontFamily: FONT_BODY, color: view === key ? INK : MUTED, borderBottom: view === key ? `2px solid ${ACCENT}` : "2px solid transparent" }}>
@@ -2426,6 +2652,24 @@ export default function App() {
       </nav>
 
       <main className="max-w-3xl mx-auto px-5 py-6">
+        {isAdmin && alertas.length > 0 && (
+          <div className="no-print flex flex-col gap-2 mb-5">
+            {alertas.map(a => (
+              <div key={a.id} className="p-3 rounded flex items-start justify-between gap-3"
+                style={{ background: a.urgente ? PENDIENTE_BG : PARCIAL_BG, border: `1px solid ${a.urgente ? PENDIENTE : PARCIAL}` }}>
+                <button
+                  onClick={() => { setSelectedEvent(a.ev); setView("ficha"); }}
+                  className="text-left flex-1"
+                  style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK, background: "none", border: "none", cursor: "pointer" }}
+                >
+                  {a.texto}
+                </button>
+                <button onClick={() => setAlertasOcultas(prev => [...prev, a.id])} style={{ color: MUTED, fontSize: 16, lineHeight: 1, fontFamily: FONT_BODY }}>×</button>
+              </div>
+            ))}
+          </div>
+        )}
+
         {view === "calendario" && (
           <MonthView year={year} month={month} events={events}
             onPrev={() => { if (month === 0) { setMonth(11); setYear(y => y - 1); } else setMonth(m => m - 1); }}
@@ -2489,6 +2733,10 @@ export default function App() {
 
         {view === "estadisticas" && <Stats events={events} />}
 
+        {view === "buscar" && (
+          <BuscadorEventos events={events} onOpenEvent={(e) => { setSelectedEvent(e); setView("ficha"); }} />
+        )}
+
         {view === "nuevo" && isAdmin && (
           <EventForm
             initial={editingEvent ? { ...editingEvent } : (newEventDate ? blankEvent(newEventDate) : null)}
@@ -2508,6 +2756,16 @@ export default function App() {
           />
         )}
       </main>
+
+      {toast && (
+        <div className="no-print" style={{
+          position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)",
+          background: INK, color: "#fff", padding: "10px 20px", borderRadius: 8,
+          fontFamily: FONT_BODY, fontSize: 13.5, boxShadow: "0 4px 16px rgba(0,0,0,0.28)", zIndex: 1000,
+        }}>
+          {toast}
+        </div>
+      )}
     </div>
   );
 }

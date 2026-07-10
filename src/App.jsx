@@ -124,6 +124,16 @@ function horasEntre(hi, hf) {
   return mins / 60;
 }
 
+// Formato de dinero para toda la app: punto de miles, coma decimal, siempre 2 decimales.
+// Ej: 54000 -> "54.000,00" · 100000 -> "100.000,00". Usar SIEMPRE esta función para
+// mostrar cualquier monto (nunca .toFixed(2) ni toLocaleString sueltos), así queda
+// consistente en toda la aplicación.
+function fmtMoney(n) {
+  const num = Number(n);
+  if (!isFinite(num)) return "0,00";
+  return num.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
 function getMonthGrid(year, month) {
   const first = new Date(year, month, 1);
   const startOffset = (first.getDay() + 6) % 7; // lunes=0
@@ -151,7 +161,7 @@ function estadoTexto(ev) {
     const pagado = Number(ev.adelanto) || 0;
     const falta = totalConIva - pagado;
     const etiqueta = ev.estadoPago === "sena" ? "Seña" : "Pago parcial — seña/adelanto";
-    return `${etiqueta} $ ${pagado.toFixed(2)} de $ ${totalConIva.toFixed(2)} · Falta facturar $ ${falta.toFixed(2)} 🟡`;
+    return `${etiqueta} $ ${fmtMoney(pagado)} de $ ${fmtMoney(totalConIva)} · Falta facturar $ ${fmtMoney(falta)} 🟡`;
   }
   return "Pendiente de pago ⏳";
 }
@@ -328,7 +338,13 @@ function totalItemsEvento(ev, valorSalonOverride) {
   const items = ev.itemsPresupuesto || [];
   const valorSalon = valorSalonOverride != null ? (Number(valorSalonOverride) || 0) : (Number(ev.valorSalon) || 0);
   const filaSalon = ev.salon ? [{ id: "auto-salon", detalle: `Salón (${ev.salon})`, cantidad: 1, valorUnitario: valorSalon, auto: true }] : [];
-  const filas = [...filaSalon, ...items];
+  // Los ítems cargados en el Vale (comida: coffee break, almuerzo, cena, etc.) se suman
+  // automáticamente acá, igual que el salón — así no hace falta cargarlos dos veces
+  // (una en el Vale y otra en la cotización).
+  const filasVale = (ev.vale?.tipos || []).map(t => ({
+    id: `auto-vale-${t.id}`, detalle: t.tipo, cantidad: Number(t.cantidad) || 0, valorUnitario: Number(t.valorUnitario) || 0, auto: true,
+  }));
+  const filas = [...filaSalon, ...filasVale, ...items];
   const totalConIva = filas.reduce((s, i) => s + (Number(i.cantidad) || 0) * (Number(i.valorUnitario) || 0), 0);
   const sinIva = totalConIva / 1.21;
   const iva = totalConIva - sinIva;
@@ -749,7 +765,7 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
           <label className="flex items-center gap-1.5"><input type="radio" disabled={ev.tarifaEspecialActiva} checked={ev.tarifaTipo === "media"} onChange={() => set("tarifaTipo", "media")} /><span style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK }}>Media tarifa</span></label>
           {salonFinal && !ev.tarifaEspecialActiva && (
             <span style={{ fontFamily: FONT_MONO, fontSize: 12.5, color: ACCENT, marginLeft: "auto" }}>
-              {tarifaValor ? `$ ${tarifaValor}` : "Sin tarifa configurada en Ajustes"}
+              {tarifaValor ? `$ ${fmtMoney(tarifaValor)}` : "Sin tarifa configurada en Ajustes"}
             </span>
           )}
         </div>
@@ -873,30 +889,39 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
               <tr style={{ borderBottom: `1px solid ${LINE}`, opacity: 0.85 }}>
                 <td className="py-1">Salón ({salonFinal}) — automático</td>
                 <td className="text-right py-1">1</td>
-                <td className="text-right py-1">$ {valorSalonAplicar.toFixed(2)}</td>
-                <td className="text-right py-1">$ {valorSalonAplicar.toFixed(2)}</td>
+                <td className="text-right py-1">$ {fmtMoney(valorSalonAplicar)}</td>
+                <td className="text-right py-1">$ {fmtMoney(valorSalonAplicar)}</td>
                 <td></td>
               </tr>
             )}
+            {(ev.vale?.tipos || []).map(t => (
+              <tr key={t.id} style={{ borderBottom: `1px solid ${LINE}`, opacity: 0.85 }}>
+                <td className="py-1">{t.tipo} — automático (del Vale)</td>
+                <td className="text-right py-1">{t.cantidad}</td>
+                <td className="text-right py-1">$ {fmtMoney(Number(t.valorUnitario))}</td>
+                <td className="text-right py-1">$ {fmtMoney((Number(t.cantidad) * Number(t.valorUnitario)))}</td>
+                <td></td>
+              </tr>
+            ))}
             {(ev.itemsPresupuesto || []).map(it => (
               <tr key={it.id} style={{ borderBottom: `1px solid ${LINE}` }}>
                 <td className="py-1">{it.detalle}</td>
                 <td className="text-right py-1">{it.cantidad}</td>
-                <td className="text-right py-1">$ {Number(it.valorUnitario).toFixed(2)}</td>
-                <td className="text-right py-1">$ {(Number(it.cantidad) * Number(it.valorUnitario)).toFixed(2)}</td>
+                <td className="text-right py-1">$ {fmtMoney(Number(it.valorUnitario))}</td>
+                <td className="text-right py-1">$ {fmtMoney((Number(it.cantidad) * Number(it.valorUnitario)))}</td>
                 <td className="text-right py-1"><button type="button" onClick={() => quitarItem(it.id)} style={{ color: PENDIENTE, fontSize: 11 }}>Quitar</button></td>
               </tr>
             ))}
             <tr>
               <td className="py-1 font-semibold" colSpan={3}>TOTAL (con IVA incluido)</td>
-              <td className="text-right py-1 font-semibold">$ {totalItemsEvento(ev, valorSalonAplicar).totalConIva.toFixed(2)}</td>
+              <td className="text-right py-1 font-semibold">$ {fmtMoney(totalItemsEvento(ev, valorSalonAplicar).totalConIva)}</td>
               <td></td>
             </tr>
           </tbody>
         </table>
-        <p style={{ fontFamily: FONT_BODY, fontSize: 11, color: MUTED, marginBottom: 10 }}>El salón se agrega solo, con el valor congelado de la tarifa aplicada. Acá abajo cargás vos la comida y otros ítems (lunch, coffee break, técnica, etc.).</p>
+        <p style={{ fontFamily: FONT_BODY, fontSize: 11, color: MUTED, marginBottom: 10 }}>El salón se suma solo (con el valor congelado de la tarifa aplicada) y la comida cargada abajo en el "Vale" también se suma sola acá — no hace falta cargarla dos veces. Usá el campo de "otros ítems" solo para cosas que NO estén en el Vale (ej: técnica, decoración, servicios extra).</p>
         <div className="grid grid-cols-4 gap-2 items-end">
-          <Field label="Detalle"><input style={inputStyle} value={nuevoItem.detalle} onChange={e => setNuevoItem(p => ({ ...p, detalle: e.target.value }))} placeholder="Ej: Coffee break" /></Field>
+          <Field label="Detalle (otro ítem, NO comida del Vale)"><input style={inputStyle} value={nuevoItem.detalle} onChange={e => setNuevoItem(p => ({ ...p, detalle: e.target.value }))} placeholder="Ej: Técnica extra, decoración" /></Field>
           <Field label="Cantidad"><input type="number" style={inputStyle} value={nuevoItem.cantidad} onChange={e => setNuevoItem(p => ({ ...p, cantidad: e.target.value }))} placeholder="Ej: 60" /></Field>
           <Field label="Valor unitario"><input type="number" style={inputStyle} value={nuevoItem.valorUnitario} onChange={e => setNuevoItem(p => ({ ...p, valorUnitario: e.target.value }))} placeholder="Ej: 20000" /></Field>
           <button type="button" onClick={agregarItem} className="px-3 py-2 rounded text-sm mb-4" style={{ background: INK_SOFT, color: PAPER }}>+ Agregar ítem</button>
@@ -918,9 +943,9 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
           const { sinIva, iva, totalConIva } = totalItemsEvento(ev, valorSalonAplicar);
           return (
             <div className="p-2.5 rounded mb-3" style={{ background: CARD, border: `1px solid ${LINE}` }}>
-              <p style={{ fontFamily: FONT_MONO, fontSize: 12.5, color: INK, marginBottom: 2 }}>Total cargado (precio final, con IVA incluido): $ {totalConIva.toFixed(2)}</p>
-              <p style={{ fontFamily: FONT_MONO, fontSize: 12.5, color: INK, marginBottom: 2 }}>Valor sin IVA (discriminado): $ {sinIva.toFixed(2)}</p>
-              <p style={{ fontFamily: FONT_MONO, fontSize: 14, color: ACCENT, fontWeight: 700 }}>IVA (21%, discriminado): $ {iva.toFixed(2)}</p>
+              <p style={{ fontFamily: FONT_MONO, fontSize: 12.5, color: INK, marginBottom: 2 }}>Total cargado (precio final, con IVA incluido): $ {fmtMoney(totalConIva)}</p>
+              <p style={{ fontFamily: FONT_MONO, fontSize: 12.5, color: INK, marginBottom: 2 }}>Valor sin IVA (discriminado): $ {fmtMoney(sinIva)}</p>
+              <p style={{ fontFamily: FONT_MONO, fontSize: 14, color: ACCENT, fontWeight: 700 }}>IVA (21%, discriminado): $ {fmtMoney(iva)}</p>
               <p style={{ fontFamily: FONT_BODY, fontSize: 11, color: MUTED, marginTop: 4 }}>Los precios que cargás arriba (salón + ítems) son siempre precios finales, con IVA incluido. El programa no suma IVA: lo discrimina hacia atrás, igual que la factura oficial del hotel.</p>
             </div>
           );
@@ -943,7 +968,7 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
               {ev.facturas.map(f => (
                 <tr key={f.id} style={{ borderBottom: `1px solid ${LINE}` }}>
                   <td className="py-1">{f.numero || "-"}</td>
-                  <td className="text-right py-1">{f.monto ? `$ ${Number(f.monto).toFixed(2)}` : "-"}</td>
+                  <td className="text-right py-1">{f.monto ? `$ ${fmtMoney(Number(f.monto))}` : "-"}</td>
                   <td className="py-1">{f.fecha || "-"}</td>
                   <td className="py-1">{f.retenciones === "si" ? "Sí" : "No"}</td>
                   <td className="py-1">{f.link ? <a href={f.link} target="_blank" rel="noreferrer" style={{ color: ACCENT, textDecoration: "underline" }}>Ver</a> : "-"}</td>
@@ -982,7 +1007,7 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
                 <Field label="Concepto de la seña (opcional)"><input style={inputStyle} value={ev.conceptoAdelanto || ""} onChange={e => set("conceptoAdelanto", e.target.value)} placeholder="Ej: seña salón, falta catering" /></Field>
               </div>
               <p style={{ fontFamily: FONT_MONO, fontSize: 14, color: PARCIAL, fontWeight: 600, marginTop: 4 }}>
-                Total $ {totalConIva.toFixed(2)} — Pagado $ {(Number(ev.adelanto) || 0).toFixed(2)} — Falta facturar $ {(totalConIva - (Number(ev.adelanto) || 0)).toFixed(2)}
+                Total $ {fmtMoney(totalConIva)} — Pagado $ {fmtMoney((Number(ev.adelanto) || 0))} — Falta facturar $ {fmtMoney((totalConIva - (Number(ev.adelanto) || 0)))}
               </p>
             </div>
           );
@@ -1017,8 +1042,8 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
                 <tr key={t.id} style={{ borderBottom: `1px solid ${LINE}` }}>
                   <td className="py-1">{t.tipo}</td>
                   <td className="text-right py-1">{t.cantidad}</td>
-                  <td className="text-right py-1">$ {Number(t.valorUnitario).toFixed(2)}</td>
-                  <td className="text-right py-1">$ {(Number(t.cantidad) * Number(t.valorUnitario)).toFixed(2)}</td>
+                  <td className="text-right py-1">$ {fmtMoney(Number(t.valorUnitario))}</td>
+                  <td className="text-right py-1">$ {fmtMoney((Number(t.cantidad) * Number(t.valorUnitario)))}</td>
                   <td className="text-right py-1"><button type="button" onClick={() => quitarTipoCubierto(t.id)} style={{ color: PENDIENTE, fontSize: 11 }}>Quitar</button></td>
                 </tr>
               ))}
@@ -1026,7 +1051,7 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
                 <td className="py-1">TOTAL cubiertos vendidos</td>
                 <td className="text-right py-1">{ev.vale.tipos.reduce((s, t) => s + (Number(t.cantidad) || 0), 0)}</td>
                 <td></td>
-                <td className="text-right py-1">$ {ev.vale.tipos.reduce((s, t) => s + (Number(t.cantidad) || 0) * (Number(t.valorUnitario) || 0), 0).toFixed(2)}</td>
+                <td className="text-right py-1">$ {fmtMoney(ev.vale.tipos.reduce((s, t) => s + (Number(t.cantidad) || 0) * (Number(t.valorUnitario) || 0), 0))}</td>
                 <td></td>
               </tr>
             </tbody>
@@ -1127,10 +1152,20 @@ function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
 /* ============================================================
    FICHA (detalle)
    ============================================================ */
-function EventDetail({ ev, jefeAreas, isAdmin, onEdit, onVaucher, onCronograma, onPlano, onVale, onComanda, tienePlantilla }) {
+/* ============================================================
+   FICHA COMPLETA — documento interno con ABSOLUTAMENTE todo lo
+   cargado, para uso del personal / control interno. No se muestra
+   directo al tocar el evento: se accede desde el resumen con el
+   botón "Ver / imprimir ficha completa". Nada se omite acá.
+   ============================================================ */
+function FichaCompleta({ ev, jefeAreas, isAdmin, onEdit, onVaucher, onCronograma, onPlano, onVale, onComanda, tienePlantilla, onBack }) {
+  const cronoOrdenado = (ev.cronograma || []).slice().sort((a, b) => (a.hora || "").localeCompare(b.hora || ""));
   return (
     <div className="p-5 rounded" style={{ background: CARD, border: `1px solid ${LINE}` }}>
-      <PrintHeader eyebrow="Ficha interna del evento" titulo={ev.nombreEvento || ev.salon || "Sin nombre"} />
+      <div className="no-print flex gap-2 mb-4">
+        <button onClick={onBack} className="px-4 py-2 rounded text-sm font-medium" style={{ border: `1px solid ${LINE}`, color: INK, fontFamily: FONT_BODY }}>‹ Volver al resumen</button>
+      </div>
+      <PrintHeader eyebrow="Ficha interna completa del evento" titulo={ev.nombreEvento || ev.salon || "Sin nombre"} />
       <div className="flex items-start justify-between mb-3">
         <div>
           {ev.colorEvento && <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: "50%", background: ev.colorEvento, marginRight: 6 }} />}
@@ -1141,7 +1176,7 @@ function EventDetail({ ev, jefeAreas, isAdmin, onEdit, onVaucher, onCronograma, 
 
       {ev.servicio && <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}><b>Concepto:</b> {ev.servicio}</p>}
       {checklistTexto(ev) && <p style={{ fontFamily: FONT_BODY, fontSize: 13, color: MUTED, marginBottom: 6 }}>{checklistTexto(ev)}</p>}
-      {ev.tarifaTipo && <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}><b>Tarifa:</b> {ev.tarifaTipo === "completa" ? "Completa" : "Media tarifa"}</p>}
+      {ev.tarifaTipo && <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}><b>Tarifa:</b> {ev.tarifaTipo === "completa" ? "Completa" : "Media tarifa"}{ev.tarifaEspecialActiva ? " (tarifa especial aplicada)" : ""}</p>}
       {(ev.horaArmado || ev.horaDesarme) && (
         <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}>
           {ev.horaArmado && <><b>Armado:</b> {ev.horaArmado} </>}{ev.horaDesarme && <><b>· Desarme:</b> {ev.horaDesarme}</>}
@@ -1152,32 +1187,29 @@ function EventDetail({ ev, jefeAreas, isAdmin, onEdit, onVaucher, onCronograma, 
       <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}>
         <b>Organiza:</b> {ev.empresaOrganiza || "-"} · <b>Contrata:</b> {ev.empresaContrata || "-"} · <b>Paga:</b> {ev.empresaPaga || "-"}
       </p>
-      {ev.cuit && <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}><b>CUIT a facturar:</b> {ev.cuit}</p>}
-      {(ev.contactos || []).filter(c => c.nombre || c.via).length > 0 && (
-        <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}>
-          <b>Contacto/s:</b> {ev.contactos.filter(c => c.nombre || c.via).map((c, i) => `${c.nombre || "-"}${c.via ? ` · ${c.via}` : ""}`).join("  /  ")}
-        </p>
-      )}
-      {ev.esHuesped && (
-        <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}>
-          <b>Hospedaje:</b> Es huésped del hotel{ev.huespedes?.length ? ` — ${ev.huespedes.join(", ")}` : ""}
-        </p>
-      )}
-      {(ev.facturas || []).length > 0 && (
-        <div style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}>
-          <b>Facturación:</b>
+      <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}><b>CUIT a facturar:</b> {ev.cuit || "-"}</p>
+      <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}>
+        <b>Contacto/s:</b> {(ev.contactos || []).filter(c => c.nombre || c.via).length > 0 ? ev.contactos.filter(c => c.nombre || c.via).map((c, i) => `${c.nombre || "-"}${c.via ? ` · ${c.via}` : ""}`).join("  /  ") : "-"}
+      </p>
+      <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}>
+        <b>Hospedaje:</b> {ev.esHuesped ? `Es huésped del hotel${ev.huespedes?.length ? ` — ${ev.huespedes.join(", ")}` : " (sin nombres cargados)"}` : "No es huésped"}
+      </p>
+
+      <div style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}>
+        <b>Facturación:</b>
+        {(ev.facturas || []).length > 0 ? (
           <ul style={{ marginLeft: 18, listStyle: "disc" }}>
             {ev.facturas.map(f => (
               <li key={f.id}>
-                {f.numero ? `Factura ${f.numero}` : "Sin número"}{f.monto ? ` · $ ${Number(f.monto).toFixed(2)}` : ""}{f.fecha ? ` · ${f.fecha}` : ""} · Retenciones: {f.retenciones === "si" ? "Sí" : "No"}
+                {f.numero ? `Factura ${f.numero}` : "Sin número"}{f.monto ? ` · $ ${fmtMoney(Number(f.monto))}` : ""}{f.fecha ? ` · ${f.fecha}` : ""} · Retenciones: {f.retenciones === "si" ? "Sí" : "No"}
                 {f.link && <> · <a href={f.link} target="_blank" rel="noreferrer" style={{ color: ACCENT, textDecoration: "underline" }}>Ver comprobante</a></>}
               </li>
             ))}
           </ul>
-        </div>
-      )}
+        ) : <span> Sin facturas cargadas.</span>}
+      </div>
 
-      {/* ---- Cotización / valor total del evento: salón automático + ítems cargados a mano ---- */}
+      {/* ---- Cotización / valor total del evento: salón + comida del Vale (automáticos) + otros ítems ---- */}
       {(() => {
         const { filas, sinIva, iva, totalConIva } = totalItemsEvento(ev);
         return (
@@ -1198,8 +1230,8 @@ function EventDetail({ ev, jefeAreas, isAdmin, onEdit, onVaucher, onCronograma, 
                     <tr key={f.id} style={{ borderBottom: `1px solid ${LINE}`, opacity: f.auto ? 0.85 : 1 }}>
                       <td className="py-1">{f.detalle}{f.auto ? " — automático" : ""}</td>
                       <td className="text-right py-1">{f.cantidad}</td>
-                      <td className="text-right py-1">$ {Number(f.valorUnitario).toFixed(2)}</td>
-                      <td className="text-right py-1">$ {(Number(f.cantidad) * Number(f.valorUnitario)).toFixed(2)}</td>
+                      <td className="text-right py-1">$ {fmtMoney(Number(f.valorUnitario))}</td>
+                      <td className="text-right py-1">$ {fmtMoney((Number(f.cantidad) * Number(f.valorUnitario)))}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -1208,101 +1240,111 @@ function EventDetail({ ev, jefeAreas, isAdmin, onEdit, onVaucher, onCronograma, 
               <p style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: MUTED, marginBottom: 8 }}>Sin ítems cargados.</p>
             )}
             <div style={{ borderTop: `1px solid ${LINE}`, paddingTop: 6, fontFamily: FONT_MONO, fontSize: 12.5, color: INK }}>
-              <div className="flex justify-between"><span>Subtotal (sin IVA)</span><span>$ {sinIva.toFixed(2)}</span></div>
-              <div className="flex justify-between"><span>IVA (21%)</span><span>$ {iva.toFixed(2)}</span></div>
-              <div className="flex justify-between" style={{ fontWeight: 700, fontSize: 14 }}><span>TOTAL (con IVA incluido)</span><span>$ {totalConIva.toFixed(2)}</span></div>
+              <div className="flex justify-between"><span>Subtotal (sin IVA)</span><span>$ {fmtMoney(sinIva)}</span></div>
+              <div className="flex justify-between"><span>IVA (21%)</span><span>$ {fmtMoney(iva)}</span></div>
+              <div className="flex justify-between" style={{ fontWeight: 700, fontSize: 14 }}><span>TOTAL (con IVA incluido)</span><span>$ {fmtMoney(totalConIva)}</span></div>
             </div>
           </div>
         );
       })()}
 
-      {(ev.estadoPago === "parcial" || ev.estadoPago === "sena") && (() => {
+      {(() => {
         const { totalConIva } = totalItemsEvento(ev);
+        const pagado = ev.estadoPago === "total" ? totalConIva : (ev.estadoPago === "parcial" || ev.estadoPago === "sena") ? (Number(ev.adelanto) || 0) : 0;
         return (
-          <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: PARCIAL, marginBottom: 6, fontWeight: 600 }}>
-            {ev.estadoPago === "sena" ? "Seña" : "Seña/adelanto"}: $ {Number(ev.adelanto) || 0} de $ {totalConIva.toFixed(2)} — Falta facturar: $ {(totalConIva - (Number(ev.adelanto) || 0)).toFixed(2)}
+          <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}>
+            <b>Estado de pago:</b> {ESTADOS_PAGO.find(([v]) => v === ev.estadoPago)?.[1] || ev.estadoPago} · <b>Pagado:</b> $ {fmtMoney(pagado)} · <b>Saldo pendiente:</b> $ {fmtMoney(totalConIva - pagado)}
             {ev.conceptoAdelanto ? ` (${ev.conceptoAdelanto})` : ""}
           </p>
         );
       })()}
 
       {/* ---- Vale (Administración): salones y cubiertos vendidos, discriminados por tipo ---- */}
-      {(ev.vale?.numero || (ev.vale?.tipos || []).length > 0) && (
-        <div className="p-3 rounded mb-4" style={{ background: CP_BG, border: `1px solid ${CP_COLOR}` }}>
-          <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: CP_COLOR, marginBottom: 8, fontWeight: 600 }}>Vale (Administración)</p>
-          <p style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK, marginBottom: 8 }}>
-            <b>N° de vale:</b> {ev.vale.numero || "-"} · <b>Salones vendidos:</b> {ev.vale.salonesVendidos || "1"}
-          </p>
-          {(ev.vale.tipos || []).length > 0 && (
-            <table className="w-full" style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: INK, borderCollapse: "collapse" }}>
-              <thead>
-                <tr style={{ borderBottom: `1px solid ${CP_COLOR}` }}>
-                  <th className="text-left py-1">Tipo de cubierto</th>
-                  <th className="text-right py-1">Cant.</th>
-                  <th className="text-right py-1">Valor uni.</th>
-                  <th className="text-right py-1">Valor total</th>
+      <div className="p-3 rounded mb-4" style={{ background: CP_BG, border: `1px solid ${CP_COLOR}` }}>
+        <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: CP_COLOR, marginBottom: 8, fontWeight: 600 }}>Vale (Administración)</p>
+        <p style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK, marginBottom: 8 }}>
+          <b>N° de vale:</b> {ev.vale?.numero || "-"} · <b>Salones vendidos:</b> {ev.vale?.salonesVendidos || "1"}
+        </p>
+        {(ev.vale?.tipos || []).length > 0 ? (
+          <table className="w-full" style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: INK, borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ borderBottom: `1px solid ${CP_COLOR}` }}>
+                <th className="text-left py-1">Tipo de cubierto</th>
+                <th className="text-right py-1">Cant.</th>
+                <th className="text-right py-1">Valor uni.</th>
+                <th className="text-right py-1">Valor total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {ev.vale.tipos.map(t => (
+                <tr key={t.id} style={{ borderBottom: `1px solid ${LINE}` }}>
+                  <td className="py-1">{t.tipo}</td>
+                  <td className="text-right py-1">{t.cantidad}</td>
+                  <td className="text-right py-1">$ {fmtMoney(Number(t.valorUnitario))}</td>
+                  <td className="text-right py-1">$ {fmtMoney((Number(t.cantidad) * Number(t.valorUnitario)))}</td>
                 </tr>
-              </thead>
-              <tbody>
-                {ev.vale.tipos.map(t => (
-                  <tr key={t.id} style={{ borderBottom: `1px solid ${LINE}` }}>
-                    <td className="py-1">{t.tipo}</td>
-                    <td className="text-right py-1">{t.cantidad}</td>
-                    <td className="text-right py-1">$ {Number(t.valorUnitario).toFixed(2)}</td>
-                    <td className="text-right py-1">$ {(Number(t.cantidad) * Number(t.valorUnitario)).toFixed(2)}</td>
-                  </tr>
-                ))}
-                <tr style={{ fontWeight: 700 }}>
-                  <td className="py-1">TOTAL cubiertos vendidos</td>
-                  <td className="text-right py-1">{ev.vale.tipos.reduce((s, t) => s + (Number(t.cantidad) || 0), 0)}</td>
-                  <td></td>
-                  <td className="text-right py-1">$ {ev.vale.tipos.reduce((s, t) => s + (Number(t.cantidad) || 0) * (Number(t.valorUnitario) || 0), 0).toFixed(2)}</td>
-                </tr>
-              </tbody>
-            </table>
-          )}
-        </div>
-      )}
+              ))}
+              <tr style={{ fontWeight: 700 }}>
+                <td className="py-1">TOTAL cubiertos vendidos</td>
+                <td className="text-right py-1">{ev.vale.tipos.reduce((s, t) => s + (Number(t.cantidad) || 0), 0)}</td>
+                <td></td>
+                <td className="text-right py-1">$ {fmtMoney(ev.vale.tipos.reduce((s, t) => s + (Number(t.cantidad) || 0) * (Number(t.valorUnitario) || 0), 0))}</td>
+              </tr>
+            </tbody>
+          </table>
+        ) : <p style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: MUTED }}>Sin tipos de cubiertos cargados en el Vale.</p>}
+      </div>
 
       {/* ---- Comanda (Cocina): cubiertos, catering, ítems a preparar ---- */}
-      {(ev.comanda?.cubiertos || ev.comanda?.caterer || (ev.comanda?.items || []).length > 0 || ev.comanda?.detalle) && (
-        <div className="p-3 rounded mb-4" style={{ background: HILITE_BG, border: `1px solid ${LINE}` }}>
-          <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: MUTED, marginBottom: 8, fontWeight: 600 }}>Comanda (Cocina)</p>
-          <p style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK, marginBottom: 8 }}>
-            <b>Cubiertos a preparar:</b> {ev.comanda.cubiertos || "-"} {ev.comanda.caterer ? <>· <b>Catering:</b> {ev.comanda.caterer}</> : ""}
-          </p>
-          {(ev.comanda.items || []).length > 0 && (
-            <table className="w-full mb-2" style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: INK, borderCollapse: "collapse" }}>
-              <thead>
-                <tr style={{ borderBottom: `1px solid ${LINE}` }}>
-                  <th className="text-left py-1">Ítem</th>
-                  <th className="text-left py-1">Detalle</th>
-                  <th className="text-right py-1">Cant.</th>
+      <div className="p-3 rounded mb-4" style={{ background: HILITE_BG, border: `1px solid ${LINE}` }}>
+        <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: MUTED, marginBottom: 8, fontWeight: 600 }}>Comanda (Cocina)</p>
+        <p style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK, marginBottom: 8 }}>
+          <b>Cubiertos a preparar:</b> {ev.comanda?.cubiertos || "-"} {ev.comanda?.caterer ? <>· <b>Catering:</b> {ev.comanda.caterer}</> : ""}
+        </p>
+        {(ev.comanda?.items || []).length > 0 ? (
+          <table className="w-full mb-2" style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: INK, borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ borderBottom: `1px solid ${LINE}` }}>
+                <th className="text-left py-1">Ítem</th>
+                <th className="text-left py-1">Detalle</th>
+                <th className="text-right py-1">Cant.</th>
+              </tr>
+            </thead>
+            <tbody>
+              {ev.comanda.items.map(it => (
+                <tr key={it.id} style={{ borderBottom: `1px solid ${LINE}` }}>
+                  <td className="py-1">{it.nombre}</td>
+                  <td className="py-1">{it.detalle}</td>
+                  <td className="text-right py-1">{it.cantidad}</td>
                 </tr>
-              </thead>
-              <tbody>
-                {ev.comanda.items.map(it => (
-                  <tr key={it.id} style={{ borderBottom: `1px solid ${LINE}` }}>
-                    <td className="py-1">{it.nombre}</td>
-                    <td className="py-1">{it.detalle}</td>
-                    <td className="text-right py-1">{it.cantidad}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-          {ev.comanda.detalle && <p style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK }}><b>Notas para cocina:</b> {ev.comanda.detalle}</p>}
-        </div>
-      )}
+              ))}
+            </tbody>
+          </table>
+        ) : <p style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: MUTED }}>Sin ítems de comanda cargados.</p>}
+        <p style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK }}><b>Notas para cocina:</b> {ev.comanda?.detalle || "-"}</p>
+      </div>
 
-      {ev.notas && <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}><b>Notas:</b> {ev.notas}</p>}
-      {ev.controlInterno && <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}><b>Control interno:</b> {ev.controlInterno}</p>}
+      {/* ---- Cronograma completo (horario a horario) ---- */}
+      <div className="p-3 rounded mb-4" style={{ background: HILITE_BG, border: `1px solid ${LINE}` }}>
+        <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: MUTED, marginBottom: 8, fontWeight: 600 }}>Cronograma</p>
+        {cronoOrdenado.length > 0 ? (
+          <div className="flex flex-col gap-1.5">
+            {cronoOrdenado.map(c => (
+              <div key={c.id} style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK }}><b>{c.hora}</b> — {c.detalle}</div>
+            ))}
+          </div>
+        ) : <p style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: MUTED }}>Sin ítems de cronograma cargados.</p>}
+      </div>
+
+      <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}><b>Notas:</b> {ev.notas || "-"}</p>
+      <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}><b>Control interno:</b> {ev.controlInterno || "-"}</p>
+      <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}><b>Notificar a Jefe de Áreas:</b> {ev.notificarJefeAreas ? "Sí" : "No"}</p>
 
       <div className="no-print flex gap-2 mt-4 flex-wrap">
         {isAdmin && <button onClick={onEdit} className="px-3 py-1.5 rounded text-xs font-medium" style={{ background: INK_SOFT, color: PAPER, fontFamily: FONT_BODY }}>Editar</button>}
-        <button onClick={() => window.print()} className="px-3 py-1.5 rounded text-xs font-medium" style={{ background: INK, color: "#fff", fontFamily: FONT_BODY }}>Imprimir ficha</button>
-        <button onClick={onVaucher} className="px-3 py-1.5 rounded text-xs font-medium" style={{ background: ACCENT, color: "#fff", fontFamily: FONT_BODY }}>Ver / imprimir vaucher</button>
-        <button onClick={onCronograma} className="px-3 py-1.5 rounded text-xs font-medium" style={{ background: PAGADO, color: PAPER, fontFamily: FONT_BODY }}>Ver cronograma</button>
+        <button onClick={() => window.print()} className="px-3 py-1.5 rounded text-xs font-medium" style={{ background: INK, color: "#fff", fontFamily: FONT_BODY }}>Imprimir ficha completa</button>
+        <button onClick={onVaucher} className="px-3 py-1.5 rounded text-xs font-medium" style={{ background: ACCENT, color: "#fff", fontFamily: FONT_BODY }}>Ver / imprimir vaucher (cliente)</button>
+        <button onClick={onCronograma} className="px-3 py-1.5 rounded text-xs font-medium" style={{ background: PAGADO, color: PAPER, fontFamily: FONT_BODY }}>Ver cronograma aparte</button>
         <button onClick={onComanda} className="px-3 py-1.5 rounded text-xs font-medium" style={{ border: `1px solid ${PAGADO}`, color: PAGADO, fontFamily: FONT_BODY }}>Ver / imprimir comanda</button>
         <button onClick={onVale} className="px-3 py-1.5 rounded text-xs font-medium" style={{ background: CP_COLOR, color: "#fff", fontFamily: FONT_BODY }}>Ver / imprimir vale</button>
         <button onClick={onPlano} className="px-3 py-1.5 rounded text-xs font-medium" style={{ border: `1px solid ${ACCENT}`, color: ACCENT, fontFamily: FONT_BODY }}>
@@ -1326,20 +1368,78 @@ function EventDetail({ ev, jefeAreas, isAdmin, onEdit, onVaucher, onCronograma, 
 }
 
 /* ============================================================
+   RESUMEN DEL EVENTO — lo que se ve al tocar el evento desde el
+   calendario: solo lo esencial (título, hora, fecha, salón). El
+   resto de la información vive en "Ficha completa".
+   ============================================================ */
+function EventoResumen({ ev, isAdmin, onEdit, onFichaCompleta, onVaucher, onCronograma, onPlano, onVale, onComanda, tienePlantilla }) {
+  return (
+    <div className="p-5 rounded" style={{ background: CARD, border: `1px solid ${LINE}` }}>
+      <div className="flex items-start justify-between mb-2">
+        <div>
+          {ev.colorEvento && <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: "50%", background: ev.colorEvento, marginRight: 6 }} />}
+          <h3 style={{ fontFamily: FONT_HEAD, fontSize: 22, color: INK, display: "inline" }}>{ev.nombreEvento || ev.salon || "Sin nombre"}</h3>
+        </div>
+        <Stamp estadoPago={ev.estadoPago} />
+      </div>
+      <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: MUTED, marginBottom: 20 }}>
+        {ev.horaInicio}–{ev.horaFin} · {fmtRangoFecha(ev)} · {ev.salon || "Sin salón"}
+      </p>
+
+      <div className="flex gap-2 flex-wrap">
+        {isAdmin && <button onClick={onEdit} className="px-3 py-1.5 rounded text-xs font-medium" style={{ background: INK_SOFT, color: PAPER, fontFamily: FONT_BODY }}>Editar</button>}
+        <button onClick={onFichaCompleta} className="px-3 py-1.5 rounded text-xs font-medium" style={{ background: INK, color: "#fff", fontFamily: FONT_BODY }}>Ver / imprimir ficha completa</button>
+        <button onClick={onVaucher} className="px-3 py-1.5 rounded text-xs font-medium" style={{ background: ACCENT, color: "#fff", fontFamily: FONT_BODY }}>Ver / imprimir vaucher (cliente)</button>
+        <button onClick={onCronograma} className="px-3 py-1.5 rounded text-xs font-medium" style={{ background: PAGADO, color: PAPER, fontFamily: FONT_BODY }}>Ver cronograma</button>
+        <button onClick={onComanda} className="px-3 py-1.5 rounded text-xs font-medium" style={{ border: `1px solid ${PAGADO}`, color: PAGADO, fontFamily: FONT_BODY }}>Ver / imprimir comanda</button>
+        <button onClick={onVale} className="px-3 py-1.5 rounded text-xs font-medium" style={{ background: CP_COLOR, color: "#fff", fontFamily: FONT_BODY }}>Ver / imprimir vale</button>
+        <button onClick={onPlano} className="px-3 py-1.5 rounded text-xs font-medium" style={{ border: `1px solid ${ACCENT}`, color: ACCENT, fontFamily: FONT_BODY }}>
+          {ev.planoDibujo ? "Ver / editar plano del evento" : tienePlantilla ? "Dibujar plano del evento" : "Plano no cargado"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
    VAUCHER (imprimible)
    ============================================================ */
 function Voucher({ ev, onBack }) {
   const { filas: items, sinIva, iva, totalConIva } = totalItemsEvento(ev);
   const pagado = ev.estadoPago === "total" ? totalConIva : (ev.estadoPago === "parcial" || ev.estadoPago === "sena") ? (Number(ev.adelanto) || 0) : 0;
   const saldo = totalConIva - pagado;
+  const voucherRef = useRef(null);
+  const [generandoImagen, setGenerandoImagen] = useState(false);
+
+  const descargarImagen = async () => {
+    if (!voucherRef.current) return;
+    setGenerandoImagen(true);
+    try {
+      const html2canvas = (await import("html2canvas")).default;
+      const canvas = await html2canvas(voucherRef.current, { scale: 2, backgroundColor: "#ffffff", useCORS: true });
+      const link = document.createElement("a");
+      const nombreArchivo = (ev.nombreEvento || ev.salon || "evento").replace(/[^\w\-]+/g, "_");
+      link.download = `Voucher_${nombreArchivo}.jpg`;
+      link.href = canvas.toDataURL("image/jpeg", 0.92);
+      link.click();
+    } catch (err) {
+      alert("No se pudo generar la imagen. Verificá que el paquete 'html2canvas' esté instalado (npm install html2canvas).");
+      console.error(err);
+    } finally {
+      setGenerandoImagen(false);
+    }
+  };
 
   return (
     <div>
-      <div className="no-print flex gap-2 mb-4">
+      <div className="no-print flex gap-2 mb-4 flex-wrap">
         <button onClick={() => window.print()} className="px-4 py-2 rounded text-sm font-medium" style={{ background: INK_SOFT, color: PAPER, fontFamily: FONT_BODY }}>Imprimir / Guardar PDF</button>
+        <button onClick={descargarImagen} disabled={generandoImagen} className="px-4 py-2 rounded text-sm font-medium" style={{ background: ACCENT, color: "#fff", fontFamily: FONT_BODY, opacity: generandoImagen ? 0.7 : 1 }}>
+          {generandoImagen ? "Generando…" : "Descargar como imagen (para mail)"}
+        </button>
         <button onClick={onBack} className="px-4 py-2 rounded text-sm font-medium" style={{ border: `1px solid ${LINE}`, color: INK, fontFamily: FONT_BODY }}>Volver</button>
       </div>
-      <div className="p-8" style={{ background: CARD, border: `1px solid ${INK}`, maxWidth: 640, margin: "0 auto" }}>
+      <div ref={voucherRef} className="p-8" style={{ background: CARD, border: `1px solid ${INK}`, maxWidth: 640, margin: "0 auto" }}>
         <PrintHeader eyebrow="Orden de evento" titulo={ev.nombreEvento || ev.salon || "Salón a confirmar"} />
         <div className="flex justify-end -mt-2 mb-3"><Stamp estadoPago={ev.estadoPago} /></div>
         <div className="grid grid-cols-2 gap-y-2 gap-x-6 mb-4" style={{ fontFamily: FONT_BODY, fontSize: 13.5, color: INK }}>
@@ -1375,13 +1475,13 @@ function Voucher({ ev, onBack }) {
                   <tr key={it.id}>
                     <td className="p-2" style={{ border: `1px solid ${LINE}` }}>{it.detalle}</td>
                     <td className="text-center p-2" style={{ border: `1px solid ${LINE}` }}>{it.cantidad}</td>
-                    <td className="text-right p-2" style={{ border: `1px solid ${LINE}` }}>$ {Number(it.valorUnitario).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</td>
-                    <td className="text-right p-2" style={{ border: `1px solid ${LINE}` }}>$ {(Number(it.cantidad) * Number(it.valorUnitario)).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</td>
+                    <td className="text-right p-2" style={{ border: `1px solid ${LINE}` }}>$ {fmtMoney(Number(it.valorUnitario))}</td>
+                    <td className="text-right p-2" style={{ border: `1px solid ${LINE}` }}>$ {fmtMoney((Number(it.cantidad) * Number(it.valorUnitario)))}</td>
                   </tr>
                 ))}
                 <tr style={{ background: HILITE_BG, fontWeight: 700 }}>
                   <td className="p-2" colSpan={3} style={{ border: `1px solid ${LINE}` }}>TOTAL (IVA incluido)</td>
-                  <td className="text-right p-2" style={{ border: `1px solid ${LINE}` }}>$ {totalConIva.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</td>
+                  <td className="text-right p-2" style={{ border: `1px solid ${LINE}` }}>$ {fmtMoney(totalConIva)}</td>
                 </tr>
               </tbody>
             </table>
@@ -1390,12 +1490,12 @@ function Voucher({ ev, onBack }) {
 
         <div className="p-3 mb-4 rounded" style={{ background: PARCIAL_BG, border: `1px solid ${PARCIAL}`, fontFamily: FONT_BODY, fontSize: 13.5, color: INK }}>
           <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: PARCIAL, marginBottom: 8, fontWeight: 600 }}>Resumen de pago</p>
-          <p><b>Valor sin IVA:</b> $ {sinIva.toFixed(2)}</p>
-          <p><b>IVA (21%):</b> $ {iva.toFixed(2)}</p>
-          <p style={{ fontWeight: 700 }}><b>Total del evento (con IVA):</b> $ {totalConIva.toFixed(2)}</p>
+          <p><b>Valor sin IVA:</b> $ {fmtMoney(sinIva)}</p>
+          <p><b>IVA (21%):</b> $ {fmtMoney(iva)}</p>
+          <p style={{ fontWeight: 700 }}><b>Total del evento (con IVA):</b> $ {fmtMoney(totalConIva)}</p>
           <div style={{ height: 1, background: PARCIAL, opacity: 0.3, margin: "8px 0" }} />
-          <p><b>Pagado:</b> $ {pagado.toFixed(2)}</p>
-          <p><b>Saldo pendiente:</b> $ {saldo.toFixed(2)}</p>
+          <p><b>Pagado:</b> $ {fmtMoney(pagado)}</p>
+          <p><b>Saldo pendiente:</b> $ {fmtMoney(saldo)}</p>
         </div>
 
         <p style={{ fontFamily: FONT_BODY, fontSize: 11, color: MUTED }}>Este comprobante confirma la reserva de la fecha con todo lo contratado. Ante cualquier consulta, comunicate con el hotel citando el nombre del evento y la fecha.</p>
@@ -1447,15 +1547,15 @@ function Vale({ ev, onBack }) {
                   <tr key={t.id} style={{ borderBottom: `1px solid ${LINE}` }}>
                     <td className="py-1">{t.tipo}</td>
                     <td className="text-right py-1">{t.cantidad}</td>
-                    <td className="text-right py-1">$ {Number(t.valorUnitario).toFixed(2)}</td>
-                    <td className="text-right py-1">$ {(Number(t.cantidad) * Number(t.valorUnitario)).toFixed(2)}</td>
+                    <td className="text-right py-1">$ {fmtMoney(Number(t.valorUnitario))}</td>
+                    <td className="text-right py-1">$ {fmtMoney((Number(t.cantidad) * Number(t.valorUnitario)))}</td>
                   </tr>
                 ))}
                 <tr style={{ fontWeight: 700 }}>
                   <td className="py-1">TOTAL</td>
                   <td className="text-right py-1">{totalCubiertos}</td>
                   <td></td>
-                  <td className="text-right py-1">$ {totalValor.toFixed(2)}</td>
+                  <td className="text-right py-1">$ {fmtMoney(totalValor)}</td>
                 </tr>
               </tbody>
             </table>
@@ -2083,7 +2183,7 @@ function BuscadorPorEmpresa({ events }) {
                     <div style={{ fontFamily: FONT_BODY, fontSize: 12, color: MUTED }}>{e.salon} · {tarifaLabel(e)}</div>
                   </div>
                   <div className="text-right">
-                    <div style={{ fontFamily: FONT_MONO, fontSize: 13, color: INK, fontWeight: 600 }}>$ {totalConIva.toFixed(2)}</div>
+                    <div style={{ fontFamily: FONT_MONO, fontSize: 13, color: INK, fontWeight: 600 }}>$ {fmtMoney(totalConIva)}</div>
                     <Stamp estadoPago={e.estadoPago} />
                   </div>
                 </div>
@@ -2095,12 +2195,12 @@ function BuscadorPorEmpresa({ events }) {
             <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: PARCIAL, marginBottom: 8, fontWeight: 600 }}>
               Consolidado de {coincidencias.length} evento{coincidencias.length === 1 ? "" : "s"} — "{busqueda}"
             </p>
-            <p style={{ fontFamily: FONT_MONO, fontSize: 12.5, color: INK }}>Total sin IVA (discriminado): $ {consolidado.sinIva.toFixed(2)}</p>
-            <p style={{ fontFamily: FONT_MONO, fontSize: 12.5, color: INK }}>IVA (21%, discriminado): $ {consolidado.iva.toFixed(2)}</p>
-            <p style={{ fontFamily: FONT_MONO, fontSize: 14, color: PARCIAL, fontWeight: 700 }}>Total consolidado (con IVA): $ {consolidado.totalConIva.toFixed(2)}</p>
+            <p style={{ fontFamily: FONT_MONO, fontSize: 12.5, color: INK }}>Total sin IVA (discriminado): $ {fmtMoney(consolidado.sinIva)}</p>
+            <p style={{ fontFamily: FONT_MONO, fontSize: 12.5, color: INK }}>IVA (21%, discriminado): $ {fmtMoney(consolidado.iva)}</p>
+            <p style={{ fontFamily: FONT_MONO, fontSize: 14, color: PARCIAL, fontWeight: 700 }}>Total consolidado (con IVA): $ {fmtMoney(consolidado.totalConIva)}</p>
             <div style={{ height: 1, background: PARCIAL, opacity: 0.3, margin: "8px 0" }} />
-            <p style={{ fontFamily: FONT_MONO, fontSize: 12.5, color: INK }}>Pagado en total: $ {consolidado.pagado.toFixed(2)}</p>
-            <p style={{ fontFamily: FONT_MONO, fontSize: 12.5, color: INK, fontWeight: 700 }}>Falta facturar/cobrar: $ {(consolidado.totalConIva - consolidado.pagado).toFixed(2)}</p>
+            <p style={{ fontFamily: FONT_MONO, fontSize: 12.5, color: INK }}>Pagado en total: $ {fmtMoney(consolidado.pagado)}</p>
+            <p style={{ fontFamily: FONT_MONO, fontSize: 12.5, color: INK, fontWeight: 700 }}>Falta facturar/cobrar: $ {fmtMoney((consolidado.totalConIva - consolidado.pagado))}</p>
           </div>
         </>
       )}
@@ -2347,7 +2447,21 @@ export default function App() {
         )}
 
         {view === "ficha" && selectedEvent && (
-          <EventDetail ev={selectedEvent} jefeAreas={jefeAreas} isAdmin={isAdmin}
+          <EventoResumen ev={selectedEvent} isAdmin={isAdmin}
+            onEdit={() => { setEditingEvent(selectedEvent); setView("nuevo"); }}
+            onFichaCompleta={() => setView("fichaCompleta")}
+            onVaucher={() => setView("vaucher")}
+            onCronograma={() => setView("cronograma")}
+            onPlano={() => setView("plano")}
+            onVale={() => setView("vale")}
+            onComanda={() => setView("comanda")}
+            tienePlantilla={!!floorplans[selectedEvent.salon]}
+          />
+        )}
+
+        {view === "fichaCompleta" && selectedEvent && (
+          <FichaCompleta ev={selectedEvent} jefeAreas={jefeAreas} isAdmin={isAdmin}
+            onBack={() => setView("ficha")}
             onEdit={() => { setEditingEvent(selectedEvent); setView("nuevo"); }}
             onVaucher={() => setView("vaucher")}
             onCronograma={() => setView("cronograma")}

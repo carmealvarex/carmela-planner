@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { ACCENT, CARD, CATERING_SUGERIDOS, COLORES_EVENTO, CP_BG, CP_COLOR, ESTADOS_PAGO, FONT_BODY, FONT_HEAD, FONT_MONO, FRANJAS_HORARIAS, HILITE_BG, INK, INK_SOFT, LINE, MUTED, PAPER, PARCIAL, PARCIAL_BG, PENDIENTE, SALONES_FIJOS, TECNICA_SUGERIDOS, VALE_TIPOS } from "../constants.js";
 import { esMultiDia, fechasEvento, fmtFecha, fmtMoney, fmtRangoFecha, uid } from "../utils/helpers.js";
 import { blankEvent, totalItemsEvento } from "../utils/eventHelpers.js";
-import { Field, HoraField, Toggle } from "./common.jsx";
+import { Field, HoraField, Toggle, inputStyle } from "./common.jsx";
 
 export function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
   const [ev, setEv] = useState(() => {

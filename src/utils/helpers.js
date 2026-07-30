@@ -71,6 +71,22 @@ export function fmtMoney(n) {
   return num.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+// Formato de fecha corto para nombres de archivo: "29-08-2026".
+export function fmtFechaCorta(iso) {
+  if (!iso) return "";
+  const [y, m, d] = iso.split("-");
+  return `${d}-${m}-${y}`;
+}
+
+// Limpia un texto para que sirva como parte de un nombre de archivo:
+// saca espacios (los reemplaza por "_") y cualquier carácter que no sea letra/número/guion.
+export function slugArchivo(s) {
+  return (s || "")
+    .trim()
+    .replace(/\s+/g, "_")
+    .replace(/[^\w\-]+/g, "");
+}
+
 export function getMonthGrid(year, month) {
   const first = new Date(year, month, 1);
   const startOffset = (first.getDay() + 6) % 7; // lunes=0

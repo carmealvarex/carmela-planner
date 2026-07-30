@@ -32,6 +32,10 @@ export function blankEvent(fecha) {
     // Vale: documento de Administración. Tiene que coincidir con el N° de factura,
     // cuántos salones se vendieron y cuántos cubiertos, discriminados por tipo.
     vale: { numero: "", salonesVendidos: "1", tipos: [] },
+    // Numeración correlativa de descarga de documentos (voucher/ficha/comanda), asignada una
+    // sola vez al guardar la ficha por primera vez, igual que el N° de vale — para que el
+    // nombre del archivo descargado sea siempre el mismo y no se pise con otro evento.
+    numeracion: { voucher: "", ficha: "", comanda: "" },
     // Comanda: documento de Cocina. Detalle de invitados/horario/salón/cronograma
     // + qué hay que cocinar (ítems con su detalle) + catering contratado.
     comanda: { cubiertos: "", detalle: "", caterer: "", items: [] },

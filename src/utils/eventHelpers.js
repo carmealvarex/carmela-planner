@@ -20,6 +20,7 @@ export function blankEvent(fecha) {
     valorSalonAdicional: "", // snapshot histórico del valor del salón adicional
     empresaOrganiza: "", empresaContrata: "", empresaPaga: "",
     cuit: "",
+    razonSocial: "", direccionFiscal: "", tipoFactura: "", condicionIva: "",
     contactoNombre: "", contactoVia: "", // legado, se migra a `contactos` al abrir la ficha
     contactos: [{ nombre: "", via: "" }],
     esHuesped: false,

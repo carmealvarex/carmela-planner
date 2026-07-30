@@ -76,12 +76,14 @@ export function Voucher({ ev, onBack }) {
           <p><b>Tarifa:</b> {ev.tarifaTipo === "completa" ? "Completa" : "Media tarifa"}{esMultiDia(ev) ? ` (${fechasEvento(ev).length} días)` : ""}</p>
         </div>
         {checklistTexto(ev) && <p style={{ fontFamily: FONT_BODY, fontSize: 13.5, color: MUTED, marginBottom: 10 }}>{checklistTexto(ev)}</p>}
-        <div className="p-3 mb-4" style={{ background: HILITE_BG, fontFamily: FONT_BODY, fontSize: 13.5, color: INK }}>
-          <p><b>Organiza:</b> {ev.empresaOrganiza || "-"}</p>
-          <p><b>Contrata:</b> {ev.empresaContrata || "-"}</p>
-          <p><b>Paga:</b> {ev.empresaPaga || "-"}</p>
-          {ev.esHuesped && <p><b>Hospedaje:</b> Huésped del hotel{ev.huespedes?.length ? ` — ${ev.huespedes.join(", ")}` : ""}</p>}
-        </div>
+        {(ev.empresaOrganiza || ev.empresaContrata || ev.empresaPaga || ev.esHuesped) && (
+          <div className="p-3 mb-4" style={{ background: HILITE_BG, fontFamily: FONT_BODY, fontSize: 13.5, color: INK }}>
+            {ev.empresaOrganiza && <p><b>Organiza:</b> {ev.empresaOrganiza}</p>}
+            {ev.empresaContrata && <p><b>Contrata:</b> {ev.empresaContrata}</p>}
+            {ev.empresaPaga && <p><b>Paga:</b> {ev.empresaPaga}</p>}
+            {ev.esHuesped && <p><b>Hospedaje:</b> Huésped del hotel{ev.huespedes?.length ? ` — ${ev.huespedes.join(", ")}` : ""}</p>}
+          </div>
+        )}
 
         {items.length > 0 && (
           <div className="mb-4">

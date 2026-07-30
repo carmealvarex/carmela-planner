@@ -32,10 +32,25 @@ export function FichaCompleta({ ev, jefeAreas, isAdmin, onEdit, onVaucher, onCro
       )}
       {ev.formatoArmado && <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}><b>Formato/tipo de armado:</b> {ev.formatoArmado}</p>}
       {ev.tecnica?.length > 0 && <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}><b>Técnica:</b> {ev.tecnica.join(", ")}</p>}
-      <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}>
-        <b>Organiza:</b> {ev.empresaOrganiza || "-"} · <b>Contrata:</b> {ev.empresaContrata || "-"} · <b>Paga:</b> {ev.empresaPaga || "-"}
-      </p>
-      <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}><b>CUIT a facturar:</b> {ev.cuit || "-"}</p>
+      {(() => {
+        const partes = [
+          ev.empresaOrganiza && { label: "Organiza", value: ev.empresaOrganiza },
+          ev.empresaContrata && { label: "Contrata", value: ev.empresaContrata },
+          ev.empresaPaga && { label: "Paga", value: ev.empresaPaga },
+        ].filter(Boolean);
+        if (partes.length === 0) return null;
+        return (
+          <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}>
+            {partes.map((p, i) => (
+              <React.Fragment key={p.label}>
+                {i > 0 && " · "}
+                <b>{p.label}:</b> {p.value}
+              </React.Fragment>
+            ))}
+          </p>
+        );
+      })()}
+      {ev.cuit && <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}><b>CUIT a facturar:</b> {ev.cuit}</p>}
       <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}>
         <b>Contacto/s:</b> {(ev.contactos || []).filter(c => c.nombre || c.via).length > 0 ? ev.contactos.filter(c => c.nombre || c.via).map((c, i) => `${c.nombre || "-"}${c.via ? ` · ${c.via}` : ""}`).join("  /  ") : "-"}
       </p>

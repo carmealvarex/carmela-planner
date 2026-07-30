@@ -21,6 +21,9 @@ export default function App() {
   });
   const [pin, setPin] = useState(null);
   const [proximoVale, setProximoVale] = useState(1);
+  const [proximoVoucher, setProximoVoucher] = useState(1);
+  const [proximoFicha, setProximoFicha] = useState(1);
+  const [proximoComanda, setProximoComanda] = useState(1);
   const [events, setEvents] = useState([]);
   const [jefeAreas, setJefeAreas] = useState({ telefono: "" });
   const [tarifas, setTarifas] = useState({});
@@ -82,12 +85,14 @@ export default function App() {
       const [ev, jefe, cfg, planos, tar, ocultas] = await Promise.all([
         loadShared("eventos", []),
         loadShared("jefeAreas", { telefono: "" }),
-        loadShared("config", { pin: null, proximoVale: 1 }),
+        loadShared("config", { pin: null, proximoVale: 1, proximoVoucher: 1, proximoFicha: 1, proximoComanda: 1 }),
         loadShared("planos", {}),
         loadShared("tarifas", {}),
         loadShared("alertasOcultas", []),
       ]);
-      setEvents(ev); setJefeAreas(jefe); setPin(cfg.pin); setProximoVale(cfg.proximoVale || 1); setFloorplans(planos); setTarifas(tar); setAlertasOcultas(ocultas);
+      setEvents(ev); setJefeAreas(jefe); setPin(cfg.pin); setProximoVale(cfg.proximoVale || 1);
+      setProximoVoucher(cfg.proximoVoucher || 1); setProximoFicha(cfg.proximoFicha || 1); setProximoComanda(cfg.proximoComanda || 1);
+      setFloorplans(planos); setTarifas(tar); setAlertasOcultas(ocultas);
       setReady(true);
     })();
   }, []);
@@ -100,7 +105,7 @@ export default function App() {
   // no vuelvan a aparecer cada vez que se abre la app.
   useEffect(() => { if (ready) saveShared("alertasOcultas", alertasOcultas); }, [alertasOcultas, ready]);
 
-  const setPinIfEmpty = (p) => { setPin(p); saveShared("config", { pin: p, proximoVale }); };
+  const setPinIfEmpty = (p) => { setPin(p); saveShared("config", { pin: p, proximoVale, proximoVoucher, proximoFicha, proximoComanda }); };
 
   const isAdmin = role === "admin";
 
@@ -114,14 +119,26 @@ export default function App() {
   useEffect(() => { if (role === "guest") setView("semana"); }, [role]);
 
   const handleSaveEvent = (ev) => {
-    // El N° de vale es siempre automático: se asigna una sola vez, la primera vez que
-    // se guarda la ficha (si ya tenía uno asignado, se respeta y no se vuelve a tocar).
+    // Los N° de vale, voucher, ficha y comanda son siempre automáticos: cada uno se asigna
+    // una sola vez, la primera vez que se guarda la ficha (si ya tenía uno asignado, se
+    // respeta y no se vuelve a tocar) — así el nombre del archivo descargado no cambia
+    // entre una descarga y otra del mismo evento.
     let finalEv = ev;
-    if (!ev.vale?.numero) {
-      const numero = formatValeNumero(proximoVale);
-      finalEv = { ...ev, vale: { ...ev.vale, numero } };
-      setProximoVale(proximoVale + 1);
-      saveShared("config", { pin, proximoVale: proximoVale + 1 });
+    let nVale = proximoVale, nVoucher = proximoVoucher, nFicha = proximoFicha, nComanda = proximoComanda;
+
+    if (!finalEv.vale?.numero) {
+      finalEv = { ...finalEv, vale: { ...finalEv.vale, numero: formatValeNumero(nVale) } };
+      nVale += 1;
+    }
+    const numeracion = { ...(finalEv.numeracion || {}) };
+    if (!numeracion.voucher) { numeracion.voucher = formatValeNumero(nVoucher); nVoucher += 1; }
+    if (!numeracion.ficha) { numeracion.ficha = formatValeNumero(nFicha); nFicha += 1; }
+    if (!numeracion.comanda) { numeracion.comanda = formatValeNumero(nComanda); nComanda += 1; }
+    finalEv = { ...finalEv, numeracion };
+
+    if (nVale !== proximoVale || nVoucher !== proximoVoucher || nFicha !== proximoFicha || nComanda !== proximoComanda) {
+      setProximoVale(nVale); setProximoVoucher(nVoucher); setProximoFicha(nFicha); setProximoComanda(nComanda);
+      saveShared("config", { pin, proximoVale: nVale, proximoVoucher: nVoucher, proximoFicha: nFicha, proximoComanda: nComanda });
     }
     setEvents(prev => {
       const exists = prev.some(e => e.id === finalEv.id);

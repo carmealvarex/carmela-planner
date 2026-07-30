@@ -16,7 +16,9 @@ import { Settings } from "./components/Settings.jsx";
 
 export default function App() {
   const [ready, setReady] = useState(false);
-  const [role, setRole] = useState(null);
+  const [role, setRole] = useState(() => {
+    try { return localStorage.getItem("plannerRole") || null; } catch { return null; }
+  });
   const [pin, setPin] = useState(null);
   const [proximoVale, setProximoVale] = useState(1);
   const [events, setEvents] = useState([]);
@@ -101,6 +103,13 @@ export default function App() {
   const setPinIfEmpty = (p) => { setPin(p); saveShared("config", { pin: p, proximoVale }); };
 
   const isAdmin = role === "admin";
+
+  useEffect(() => {
+    try {
+      if (role) localStorage.setItem("plannerRole", role);
+      else localStorage.removeItem("plannerRole");
+    } catch {}
+  }, [role]);
 
   useEffect(() => { if (role === "guest") setView("semana"); }, [role]);
 

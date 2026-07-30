@@ -40,6 +40,9 @@ export const TECNICA_SUGERIDOS = ["Proyector", "Rotafolio", "Pantalla", "Micróf
 export const SALONES_FIJOS = ["Salón Argos", "Sala España", "Sala 1", "Sala 2", "SALON MICROCINE"];
 
 export const VALE_TIPOS = ["Coffee break", "Almuerzo", "Cena", "Desayuno", "Brindis", "Finger food", "Otro"];
+
+export const TIPOS_FACTURA = ["A", "B", "C", "M", "Exenta"];
+export const CONDICIONES_IVA = ["Responsable Inscripto", "Monotributo", "Exento", "Consumidor Final", "No Categorizado"];
 // El N° de vale ahora es siempre automático y correlativo (no se carga a mano).
 export function formatValeNumero(n) { return String(n).padStart(4, "0"); }
 

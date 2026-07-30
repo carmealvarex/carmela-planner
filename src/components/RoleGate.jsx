@@ -2,6 +2,17 @@ import React, { useState } from "react";
 import { ACCENT, CARD, FONT_BODY, INK, INK_SOFT, LINE, MUTED, PAPER, PENDIENTE } from "../constants.js";
 import { LogoCA } from "./common.jsx";
 
+const inputStyle = {
+  width: "100%",
+  padding: "10px 12px",
+  borderRadius: 6,
+  border: `1px solid ${LINE}`,
+  fontFamily: FONT_BODY,
+  fontSize: 14,
+  color: INK,
+  background: PAPER,
+};
+
 export function RoleGate({ onEnter, pin, setPinIfEmpty }) {
   const [step, setStep] = useState(null);
   const [input, setInput] = useState("");

@@ -22,3 +22,9 @@ export const MESES = [
   'Noviembre',
   'Diciembre'
 ];
+export const MUTED = '#6b7280';
+export const PRIMARY = '#111827';
+export const SECONDARY = '#374151';
+export const ACCENT = '#2563eb';
+export const BORDER = '#e5e7eb';
+export const BG = '#ffffff';

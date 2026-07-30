@@ -1,17 +1,50 @@
-import React from "react";
+import React, { useRef, useState } from "react";
 import { ACCENT, CARD, CP_BG, CP_COLOR, ESTADOS_PAGO, FONT_BODY, FONT_HEAD, FONT_MONO, HILITE_BG, INK, INK_SOFT, LINE, MUTED, PAGADO, PAPER } from "../constants.js";
-import { esMultiDia, fechasEvento, fmtMoney, fmtRangoFecha } from "../utils/helpers.js";
+import { esMultiDia, fechasEvento, fmtFechaCorta, fmtMoney, fmtRangoFecha, slugArchivo } from "../utils/helpers.js";
 import { checklistTexto, textoJefeAreas, waLink } from "../utils/texto.js";
 import { totalItemsEvento } from "../utils/eventHelpers.js";
 import { PrintHeader, Stamp } from "./common.jsx";
 
 export function FichaCompleta({ ev, jefeAreas, isAdmin, onEdit, onVaucher, onCronograma, onPlano, onVale, onComanda, tienePlantilla, onBack }) {
   const cronoOrdenado = (ev.cronograma || []).slice().sort((a, b) => (a.hora || "").localeCompare(b.hora || ""));
+  const fichaRef = useRef(null);
+  const [generandoPDF, setGenerandoPDF] = useState(false);
+
+  const nombreFicha = () => {
+    const num = ev.numeracion?.ficha || "0000";
+    const empresa = slugArchivo(ev.empresaOrganiza || ev.empresaContrata || "Cliente");
+    const evento = slugArchivo(ev.nombreEvento || ev.salon || "Evento");
+    return `FICHA_${num}_${empresa}_${evento}`;
+  };
+
+  const descargarPDF = async () => {
+    if (!fichaRef.current) return;
+    setGenerandoPDF(true);
+    try {
+      const html2canvas = (await import("html2canvas")).default;
+      const { jsPDF } = await import("jspdf");
+      const canvas = await html2canvas(fichaRef.current, { scale: 2, backgroundColor: "#ffffff", useCORS: true });
+      const imgData = canvas.toDataURL("image/jpeg", 0.95);
+      const pdf = new jsPDF({ orientation: canvas.width >= canvas.height ? "landscape" : "portrait", unit: "px", format: [canvas.width, canvas.height] });
+      pdf.addImage(imgData, "JPEG", 0, 0, canvas.width, canvas.height);
+      pdf.save(`${nombreFicha()}.pdf`);
+    } catch (err) {
+      alert("No se pudo generar el PDF. Verificá que el paquete 'jspdf' esté instalado (npm install jspdf).");
+      console.error(err);
+    } finally {
+      setGenerandoPDF(false);
+    }
+  };
+
   return (
     <div className="p-5 rounded" style={{ background: CARD, border: `1px solid ${LINE}` }}>
       <div className="no-print flex gap-2 mb-4">
         <button onClick={onBack} className="px-4 py-2 rounded text-sm font-medium" style={{ border: `1px solid ${LINE}`, color: INK, fontFamily: FONT_BODY }}>‹ Volver al resumen</button>
+        <button onClick={descargarPDF} disabled={generandoPDF} className="px-4 py-2 rounded text-sm font-medium" style={{ border: `1px solid ${ACCENT}`, color: ACCENT, fontFamily: FONT_BODY, opacity: generandoPDF ? 0.7 : 1 }}>
+          {generandoPDF ? "Generando…" : "Descargar ficha como PDF"}
+        </button>
       </div>
+      <div ref={fichaRef}>
       <PrintHeader eyebrow="Ficha interna completa del evento" titulo={ev.nombreEvento || ev.salon || "Sin nombre"} />
       <div className="flex items-start justify-between mb-3">
         <div>
@@ -225,6 +258,8 @@ export function FichaCompleta({ ev, jefeAreas, isAdmin, onEdit, onVaucher, onCro
       <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}><b>Notas:</b> {ev.notas || "-"}</p>
       <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}><b>Control interno:</b> {ev.controlInterno || "-"}</p>
       <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}><b>Notificar a Jefe de Áreas:</b> {ev.notificarJefeAreas ? "Sí" : "No"}</p>
+      <p className="mt-2" style={{ fontFamily: FONT_MONO, fontSize: 10.5, color: MUTED }}>Generado el {new Date().toLocaleDateString("es-AR")}</p>
+      </div>
 
       <div className="no-print flex gap-2 mt-4 flex-wrap">
         {isAdmin && <button onClick={onEdit} className="px-3 py-1.5 rounded text-xs font-medium" style={{ background: INK_SOFT, color: PAPER, fontFamily: FONT_BODY }}>Editar</button>}
@@ -248,7 +283,6 @@ export function FichaCompleta({ ev, jefeAreas, isAdmin, onEdit, onVaucher, onCro
           <p style={{ fontFamily: FONT_BODY, fontSize: 11.5, color: MUTED, marginTop: 6 }}>Se abre un solo chat de WhatsApp con todo el detalle. Vos lo reenviás a los grupos que corresponda.</p>
         </div>
       )}
-      <p className="mt-6" style={{ fontFamily: FONT_MONO, fontSize: 10.5, color: MUTED }}>Generado el {new Date().toLocaleDateString("es-AR")}</p>
     </div>
   );
 }

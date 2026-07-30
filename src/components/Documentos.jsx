@@ -1,6 +1,6 @@
 import React, { useRef, useState } from "react";
 import { ACCENT, CARD, CP_BG, CP_COLOR, FONT_BODY, FONT_HEAD, FONT_MONO, HILITE_BG, INK, INK_SOFT, LINE, MUTED, PAGADO, PAGADO_BG, PAPER, PARCIAL, PARCIAL_BG } from "../constants.js";
-import { esMultiDia, fechasEvento, fmtMoney, fmtRangoFecha } from "../utils/helpers.js";
+import { esMultiDia, fechasEvento, fmtFechaCorta, fmtMoney, fmtRangoFecha, slugArchivo } from "../utils/helpers.js";
 import { checklistTexto } from "../utils/texto.js";
 import { totalItemsEvento } from "../utils/eventHelpers.js";
 import { PrintHeader, Stamp } from "./common.jsx";
@@ -13,6 +13,13 @@ export function Voucher({ ev, onBack }) {
   const [generandoImagen, setGenerandoImagen] = useState(false);
   const [generandoPDF, setGenerandoPDF] = useState(false);
 
+  const nombreVoucher = () => {
+    const num = ev.numeracion?.voucher || "0000";
+    const empresa = slugArchivo(ev.empresaOrganiza || ev.empresaContrata || ev.nombreEvento || "Cliente");
+    const fecha = fmtFechaCorta(ev.fecha);
+    return `VOUCHER_${num}_${empresa}_${fecha}`;
+  };
+
   const descargarImagen = async () => {
     if (!voucherRef.current) return;
     setGenerandoImagen(true);
@@ -20,8 +27,7 @@ export function Voucher({ ev, onBack }) {
       const html2canvas = (await import("html2canvas")).default;
       const canvas = await html2canvas(voucherRef.current, { scale: 2, backgroundColor: "#ffffff", useCORS: true });
       const link = document.createElement("a");
-      const nombreArchivo = (ev.nombreEvento || ev.salon || "evento").replace(/[^\w\-]+/g, "_");
-      link.download = `Voucher_${nombreArchivo}.jpg`;
+      link.download = `${nombreVoucher()}.jpg`;
       link.href = canvas.toDataURL("image/jpeg", 0.92);
       link.click();
     } catch (err) {
@@ -42,8 +48,7 @@ export function Voucher({ ev, onBack }) {
       const imgData = canvas.toDataURL("image/jpeg", 0.95);
       const pdf = new jsPDF({ orientation: canvas.width >= canvas.height ? "landscape" : "portrait", unit: "px", format: [canvas.width, canvas.height] });
       pdf.addImage(imgData, "JPEG", 0, 0, canvas.width, canvas.height);
-      const nombreArchivo = (ev.nombreEvento || ev.salon || "evento").replace(/[^\w\-]+/g, "_");
-      pdf.save(`Voucher_${nombreArchivo}.pdf`);
+      pdf.save(`${nombreVoucher()}.pdf`);
     } catch (err) {
       alert("No se pudo generar el PDF. Verificá que el paquete 'jspdf' esté instalado (npm install jspdf).");
       console.error(err);
@@ -151,13 +156,45 @@ export function Vale({ ev, onBack }) {
   const tipos = v.tipos || [];
   const totalCubiertos = tipos.reduce((s, t) => s + (Number(t.cantidad) || 0), 0);
   const totalValor = tipos.reduce((s, t) => s + (Number(t.cantidad) || 0) * (Number(t.valorUnitario) || 0), 0);
+  const valeRef = useRef(null);
+  const [generandoPDF, setGenerandoPDF] = useState(false);
+
+  const nombreVale = () => {
+    const num = v.numero || "0000";
+    const concepto = slugArchivo(ev.servicio || ev.nombreEvento || "Evento");
+    const fecha = fmtFechaCorta(ev.fecha);
+    return `VALE_${num}_${concepto}_${fecha}`;
+  };
+
+  const descargarPDF = async () => {
+    if (!valeRef.current) return;
+    setGenerandoPDF(true);
+    try {
+      const html2canvas = (await import("html2canvas")).default;
+      const { jsPDF } = await import("jspdf");
+      const canvas = await html2canvas(valeRef.current, { scale: 2, backgroundColor: "#ffffff", useCORS: true });
+      const imgData = canvas.toDataURL("image/jpeg", 0.95);
+      const pdf = new jsPDF({ orientation: canvas.width >= canvas.height ? "landscape" : "portrait", unit: "px", format: [canvas.width, canvas.height] });
+      pdf.addImage(imgData, "JPEG", 0, 0, canvas.width, canvas.height);
+      pdf.save(`${nombreVale()}.pdf`);
+    } catch (err) {
+      alert("No se pudo generar el PDF. Verificá que el paquete 'jspdf' esté instalado (npm install jspdf).");
+      console.error(err);
+    } finally {
+      setGenerandoPDF(false);
+    }
+  };
+
   return (
     <div>
-      <div className="no-print flex gap-2 mb-4">
+      <div className="no-print flex gap-2 mb-4 flex-wrap">
         <button onClick={() => window.print()} className="px-4 py-2 rounded text-sm font-medium" style={{ background: INK_SOFT, color: PAPER, fontFamily: FONT_BODY }}>Imprimir vale</button>
+        <button onClick={descargarPDF} disabled={generandoPDF} className="px-4 py-2 rounded text-sm font-medium" style={{ border: `1px solid ${ACCENT}`, color: ACCENT, fontFamily: FONT_BODY, opacity: generandoPDF ? 0.7 : 1 }}>
+          {generandoPDF ? "Generando…" : "Descargar como PDF"}
+        </button>
         <button onClick={onBack} className="px-4 py-2 rounded text-sm font-medium" style={{ border: `1px solid ${LINE}`, color: INK, fontFamily: FONT_BODY }}>Volver</button>
       </div>
-      <div className="p-8" style={{ background: CARD, border: `1px solid ${INK}`, maxWidth: 640, margin: "0 auto" }}>
+      <div ref={valeRef} className="p-8" style={{ background: CARD, border: `1px solid ${INK}`, maxWidth: 640, margin: "0 auto" }}>
         <PrintHeader eyebrow="Vale · Control administrativo" titulo={`N° ${v.numero || "-"}`} />
         <div className="grid grid-cols-2 gap-y-2 gap-x-6 mb-4" style={{ fontFamily: FONT_BODY, fontSize: 13.5, color: INK }}>
           <p><b>N° de vale:</b> {v.numero || "-"}</p>
@@ -216,13 +253,44 @@ export function Vale({ ev, onBack }) {
 export function Comanda({ ev, onBack }) {
   const c = ev.comanda || {};
   const cronoOrdenado = (ev.cronograma || []).slice().sort((a, b) => (a.hora || "").localeCompare(b.hora || ""));
+  const comandaRef = useRef(null);
+  const [generandoPDF, setGenerandoPDF] = useState(false);
+
+  const nombreComanda = () => {
+    const num = ev.numeracion?.comanda || "0000";
+    const fecha = fmtFechaCorta(ev.fecha);
+    return `COMANDA_${num}_${fecha}`;
+  };
+
+  const descargarPDF = async () => {
+    if (!comandaRef.current) return;
+    setGenerandoPDF(true);
+    try {
+      const html2canvas = (await import("html2canvas")).default;
+      const { jsPDF } = await import("jspdf");
+      const canvas = await html2canvas(comandaRef.current, { scale: 2, backgroundColor: "#ffffff", useCORS: true });
+      const imgData = canvas.toDataURL("image/jpeg", 0.95);
+      const pdf = new jsPDF({ orientation: canvas.width >= canvas.height ? "landscape" : "portrait", unit: "px", format: [canvas.width, canvas.height] });
+      pdf.addImage(imgData, "JPEG", 0, 0, canvas.width, canvas.height);
+      pdf.save(`${nombreComanda()}.pdf`);
+    } catch (err) {
+      alert("No se pudo generar el PDF. Verificá que el paquete 'jspdf' esté instalado (npm install jspdf).");
+      console.error(err);
+    } finally {
+      setGenerandoPDF(false);
+    }
+  };
+
   return (
     <div>
-      <div className="no-print flex gap-2 mb-4">
+      <div className="no-print flex gap-2 mb-4 flex-wrap">
         <button onClick={() => window.print()} className="px-4 py-2 rounded text-sm font-medium" style={{ background: INK_SOFT, color: PAPER, fontFamily: FONT_BODY }}>Imprimir comanda</button>
+        <button onClick={descargarPDF} disabled={generandoPDF} className="px-4 py-2 rounded text-sm font-medium" style={{ border: `1px solid ${ACCENT}`, color: ACCENT, fontFamily: FONT_BODY, opacity: generandoPDF ? 0.7 : 1 }}>
+          {generandoPDF ? "Generando…" : "Descargar como PDF"}
+        </button>
         <button onClick={onBack} className="px-4 py-2 rounded text-sm font-medium" style={{ border: `1px solid ${LINE}`, color: INK, fontFamily: FONT_BODY }}>Volver</button>
       </div>
-      <div className="p-8" style={{ background: CARD, border: `1px solid ${INK}`, maxWidth: 640, margin: "0 auto" }}>
+      <div ref={comandaRef} className="p-8" style={{ background: CARD, border: `1px solid ${INK}`, maxWidth: 640, margin: "0 auto" }}>
         <PrintHeader eyebrow="Comanda de cocina" titulo={ev.salon || "Salón"} />
         <div className="grid grid-cols-2 gap-y-2 gap-x-6 mb-4" style={{ fontFamily: FONT_BODY, fontSize: 13.5, color: INK }}>
           <p><b>Fecha:</b> {fmtRangoFecha(ev)}</p>

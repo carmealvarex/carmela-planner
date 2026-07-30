@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { ACCENT, CARD, CATERING_SUGERIDOS, COLORES_EVENTO, CP_BG, CP_COLOR, ESTADOS_PAGO, FONT_BODY, FONT_HEAD, FONT_MONO, FRANJAS_HORARIAS, HILITE_BG, INK, INK_SOFT, LINE, MUTED, PAPER, PARCIAL, PARCIAL_BG, PENDIENTE, SALONES_FIJOS, TECNICA_SUGERIDOS, VALE_TIPOS } from "../constants.js";
+import { ACCENT, CARD, CATERING_SUGERIDOS, COLORES_EVENTO, CONDICIONES_IVA, CP_BG, CP_COLOR, ESTADOS_PAGO, FONT_BODY, FONT_HEAD, FONT_MONO, FRANJAS_HORARIAS, HILITE_BG, INK, INK_SOFT, LINE, MUTED, PAPER, PARCIAL, PARCIAL_BG, PENDIENTE, SALONES_FIJOS, TECNICA_SUGERIDOS, TIPOS_FACTURA, VALE_TIPOS } from "../constants.js";
 import { esMultiDia, fechasEvento, fmtFecha, fmtMoney, fmtRangoFecha, uid } from "../utils/helpers.js";
 import { blankEvent, totalItemsEvento } from "../utils/eventHelpers.js";
 import { Field, HoraField, Toggle, inputStyle } from "./common.jsx";
@@ -296,6 +296,25 @@ export function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
       <Field label="CUIT a facturar">
         <input style={inputStyle} value={ev.cuit || ""} onChange={e => set("cuit", e.target.value)} placeholder="Ej: 30-12345678-9" />
       </Field>
+
+      <div className="grid grid-cols-2 gap-x-4">
+        <Field label="Razón social"><input style={inputStyle} value={ev.razonSocial || ""} onChange={e => set("razonSocial", e.target.value)} placeholder="Ej: Camuzzi Gas S.A." /></Field>
+        <Field label="Dirección fiscal"><input style={inputStyle} value={ev.direccionFiscal || ""} onChange={e => set("direccionFiscal", e.target.value)} placeholder="Ej: Av. Siempre Viva 742, CABA" /></Field>
+      </div>
+      <div className="grid grid-cols-2 gap-x-4">
+        <Field label="Tipo de factura">
+          <select style={inputStyle} value={ev.tipoFactura || ""} onChange={e => set("tipoFactura", e.target.value)}>
+            <option value="">Elegir tipo…</option>
+            {TIPOS_FACTURA.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+        </Field>
+        <Field label="Condición frente al IVA (opcional)">
+          <select style={inputStyle} value={ev.condicionIva || ""} onChange={e => set("condicionIva", e.target.value)}>
+            <option value="">Sin especificar</option>
+            {CONDICIONES_IVA.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </Field>
+      </div>
 
       <Field label="Contacto/s (al menos uno, se puede agregar más de uno)">
         <div className="flex flex-col gap-2 mb-2">

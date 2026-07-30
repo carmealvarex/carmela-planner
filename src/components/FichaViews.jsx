@@ -51,6 +51,25 @@ export function FichaCompleta({ ev, jefeAreas, isAdmin, onEdit, onVaucher, onCro
         );
       })()}
       {ev.cuit && <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}><b>CUIT a facturar:</b> {ev.cuit}</p>}
+      {(() => {
+        const partesFact = [
+          ev.razonSocial && { label: "Razón social", value: ev.razonSocial },
+          ev.direccionFiscal && { label: "Dirección fiscal", value: ev.direccionFiscal },
+          ev.tipoFactura && { label: "Tipo de factura", value: ev.tipoFactura },
+          ev.condicionIva && { label: "Condición frente al IVA", value: ev.condicionIva },
+        ].filter(Boolean);
+        if (partesFact.length === 0) return null;
+        return (
+          <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}>
+            {partesFact.map((p, i) => (
+              <React.Fragment key={p.label}>
+                {i > 0 && " · "}
+                <b>{p.label}:</b> {p.value}
+              </React.Fragment>
+            ))}
+          </p>
+        );
+      })()}
       <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}>
         <b>Contacto/s:</b> {(ev.contactos || []).filter(c => c.nombre || c.via).length > 0 ? ev.contactos.filter(c => c.nombre || c.via).map((c, i) => `${c.nombre || "-"}${c.via ? ` · ${c.via}` : ""}`).join("  /  ") : "-"}
       </p>

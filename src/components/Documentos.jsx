@@ -85,6 +85,17 @@ export function Voucher({ ev, onBack }) {
           </div>
         )}
 
+        {(ev.cuit || ev.razonSocial || ev.direccionFiscal || ev.tipoFactura || ev.condicionIva) && (
+          <div className="p-3 mb-4" style={{ background: HILITE_BG, fontFamily: FONT_BODY, fontSize: 13.5, color: INK }}>
+            <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: INK, marginBottom: 6, fontWeight: 600 }}>Datos de facturación</p>
+            {ev.razonSocial && <p><b>Razón social:</b> {ev.razonSocial}</p>}
+            {ev.cuit && <p><b>CUIT:</b> {ev.cuit}</p>}
+            {ev.direccionFiscal && <p><b>Dirección fiscal:</b> {ev.direccionFiscal}</p>}
+            {ev.tipoFactura && <p><b>Tipo de factura:</b> {ev.tipoFactura}</p>}
+            {ev.condicionIva && <p><b>Condición frente al IVA:</b> {ev.condicionIva}</p>}
+          </div>
+        )}
+
         {items.length > 0 && (
           <div className="mb-4">
             <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: INK, marginBottom: 6, fontWeight: 600 }}>Servicios contratados</p>

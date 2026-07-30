@@ -37,7 +37,7 @@ export const CATERING_SUGERIDOS = ["Café", "Agua", "Coffee break", "Caramelos",
 
 export const TECNICA_SUGERIDOS = ["Proyector", "Rotafolio", "Pantalla", "Micrófonos", "Alquiler de pantalla aparte", "Sonido", "Wifi dedicado", "Iluminación especial"];
 
-export const SALONES_FIJOS = ["Salón Argos", "Sala España", "Sala 1", "Sala 2", "Salón Auditorio"];
+export const SALONES_FIJOS = ["Salón Argos", "Sala España", "Sala 1", "Sala 2", "SALON MICROCINE"];
 
 export const VALE_TIPOS = ["Coffee break", "Almuerzo", "Cena", "Desayuno", "Brindis", "Finger food", "Otro"];
 // El N° de vale ahora es siempre automático y correlativo (no se carga a mano).

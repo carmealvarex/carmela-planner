@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { ACCENT, CARD, FONT_BODY, FONT_HEAD, HILITE_BG, INK, INK_SOFT, LINE, MUTED, PAPER, PENDIENTE, SALONES_FIJOS } from "../constants.js";
 import { toISO } from "../utils/helpers.js";
-import { Field } from "./common.jsx";
+import { Field, inputStyle } from "./common.jsx";
 import { DropZone, ImportICS } from "./ImportPlano.jsx";
 
 export function Settings({ jefeAreas, setJefeAreas, tarifas, setTarifas, floorplans, setFloorplans, events, onImportEvents, onMarkPastAsPaid }) {

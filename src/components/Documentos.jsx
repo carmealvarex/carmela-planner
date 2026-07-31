@@ -1,5 +1,5 @@
 import React, { useRef, useState } from "react";
-import { ACCENT, CARD, CP_BG, CP_COLOR, FONT_BODY, FONT_HEAD, FONT_MONO, HILITE_BG, INK, INK_SOFT, LINE, MUTED, PAGADO, PAGADO_BG, PAPER, PARCIAL, PARCIAL_BG } from "../constants.js";
+import { ACCENT, CARD, CP_BG, CP_COLOR, FONT_BODY, FONT_HEAD, FONT_MONO, HILITE_BG, INK, INK_SOFT, LINE, MUTED, PAGADO, PAGADO_BG, PAPER, PARCIAL, PARCIAL_BG, labelTarifaTipo } from "../constants.js";
 import { esMultiDia, fechasEvento, fmtFechaCorta, fmtMoney, fmtRangoFecha, slugArchivo } from "../utils/helpers.js";
 import { checklistTexto } from "../utils/texto.js";
 import { totalItemsEvento } from "../utils/eventHelpers.js";
@@ -78,7 +78,7 @@ export function Voucher({ ev, onBack }) {
           <p><b>Horario:</b> {ev.horaInicio} a {ev.horaFin}</p>
           <p><b>Personas:</b> {ev.personas || "-"}</p>
           <p><b>Concepto:</b> {ev.servicio || "-"}</p>
-          <p><b>Tarifa:</b> {ev.tarifaTipo === "completa" ? "Completa" : "Media tarifa"}{esMultiDia(ev) ? ` (${fechasEvento(ev).length} días)` : ""}</p>
+          <p><b>Tarifa:</b> {esMultiDia(ev) && (ev.dias || []).length ? `Ver desglose por día (${fechasEvento(ev).length} días)` : labelTarifaTipo(ev.tarifaTipo)}</p>
         </div>
         {checklistTexto(ev) && <p style={{ fontFamily: FONT_BODY, fontSize: 13.5, color: MUTED, marginBottom: 10 }}>{checklistTexto(ev)}</p>}
         {(ev.empresaOrganiza || ev.empresaContrata || ev.empresaPaga || ev.esHuesped) && (
@@ -153,7 +153,12 @@ export function Voucher({ ev, onBack }) {
    ============================================================ */
 export function Vale({ ev, onBack }) {
   const v = ev.vale || {};
-  const tipos = v.tipos || [];
+  const multiDiaVale = esMultiDia(ev) && (ev.dias || []).length > 0;
+  // En eventos de varios días, la comida vendida está cargada por día (ev.dias[].valeTipos);
+  // se junta todo en una sola lista, con la fecha de cada ítem, para el vale impreso.
+  const tipos = multiDiaVale
+    ? ev.dias.flatMap(d => (d.valeTipos || []).map(t => ({ ...t, fecha: d.fecha })))
+    : (v.tipos || []);
   const totalCubiertos = tipos.reduce((s, t) => s + (Number(t.cantidad) || 0), 0);
   const totalValor = tipos.reduce((s, t) => s + (Number(t.cantidad) || 0) * (Number(t.valorUnitario) || 0), 0);
   const valeRef = useRef(null);
@@ -211,6 +216,7 @@ export function Vale({ ev, onBack }) {
             <table className="w-full" style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK, borderCollapse: "collapse" }}>
               <thead>
                 <tr style={{ borderBottom: `1px solid ${CP_COLOR}` }}>
+                  {multiDiaVale && <th className="text-left py-1">Día</th>}
                   <th className="text-left py-1">Tipo</th>
                   <th className="text-right py-1">Cant.</th>
                   <th className="text-right py-1">Valor uni.</th>
@@ -220,7 +226,8 @@ export function Vale({ ev, onBack }) {
               </thead>
               <tbody>
                 {tipos.map(t => (
-                  <tr key={t.id} style={{ borderBottom: `1px solid ${LINE}` }}>
+                  <tr key={`${t.fecha || ""}-${t.id}`} style={{ borderBottom: `1px solid ${LINE}` }}>
+                    {multiDiaVale && <td className="py-1">{t.fecha}</td>}
                     <td className="py-1">{t.tipo}</td>
                     <td className="text-right py-1">{t.cantidad}</td>
                     <td className="text-right py-1">$ {fmtMoney(Number(t.valorUnitario))}</td>
@@ -229,7 +236,7 @@ export function Vale({ ev, onBack }) {
                   </tr>
                 ))}
                 <tr style={{ fontWeight: 700 }}>
-                  <td className="py-1">TOTAL</td>
+                  <td className="py-1" colSpan={multiDiaVale ? 2 : 1}>TOTAL</td>
                   <td className="text-right py-1">{totalCubiertos}</td>
                   <td></td>
                   <td className="text-right py-1">$ {fmtMoney(totalValor)}</td>
@@ -252,6 +259,12 @@ export function Vale({ ev, onBack }) {
    ============================================================ */
 export function Comanda({ ev, onBack }) {
   const c = ev.comanda || {};
+  const multiDiaComanda = esMultiDia(ev) && (ev.dias || []).length > 0;
+  // En eventos de varios días, lo que hay que cocinar está cargado por día
+  // (ev.dias[].comandaItems); se junta todo con la fecha de cada ítem para la comanda impresa.
+  const itemsComanda = multiDiaComanda
+    ? ev.dias.flatMap(d => (d.comandaItems || []).map(it => ({ ...it, fecha: d.fecha })))
+    : (c.items || []);
   const cronoOrdenado = (ev.cronograma || []).slice().sort((a, b) => (a.hora || "").localeCompare(b.hora || ""));
   const comandaRef = useRef(null);
   const [generandoPDF, setGenerandoPDF] = useState(false);
@@ -305,20 +318,22 @@ export function Comanda({ ev, onBack }) {
           <p style={{ fontFamily: FONT_HEAD, fontSize: 22, color: PAGADO }}>{c.cubiertos || "-"} cubiertos a preparar</p>
         </div>
 
-        {c.items?.length > 0 && (
+        {itemsComanda.length > 0 && (
           <div className="mb-4">
             <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: INK, marginBottom: 6, fontWeight: 600 }}>Qué cocinar</p>
             <table className="w-full" style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK, borderCollapse: "collapse", border: `1px solid ${INK}` }}>
               <thead>
                 <tr style={{ background: HILITE_BG }}>
+                  {multiDiaComanda && <th className="text-left p-2" style={{ border: `1px solid ${LINE}` }}>Día</th>}
                   <th className="text-left p-2" style={{ border: `1px solid ${LINE}` }}>Ítem</th>
                   <th className="text-left p-2" style={{ border: `1px solid ${LINE}` }}>Detalle</th>
                   <th className="text-right p-2" style={{ border: `1px solid ${LINE}` }}>Cant.</th>
                 </tr>
               </thead>
               <tbody>
-                {c.items.map(it => (
-                  <tr key={it.id}>
+                {itemsComanda.map(it => (
+                  <tr key={`${it.fecha || ""}-${it.id}`}>
+                    {multiDiaComanda && <td className="p-2" style={{ border: `1px solid ${LINE}` }}>{it.fecha}</td>}
                     <td className="p-2" style={{ border: `1px solid ${LINE}` }}>{it.nombre}</td>
                     <td className="p-2" style={{ border: `1px solid ${LINE}` }}>{it.detalle}</td>
                     <td className="text-right p-2" style={{ border: `1px solid ${LINE}` }}>{it.cantidad}</td>

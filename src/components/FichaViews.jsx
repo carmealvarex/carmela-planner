@@ -1,5 +1,5 @@
 import React, { useRef, useState } from "react";
-import { ACCENT, CARD, CP_BG, CP_COLOR, ESTADOS_PAGO, FONT_BODY, FONT_HEAD, FONT_MONO, HILITE_BG, INK, INK_SOFT, LINE, MUTED, PAGADO, PAPER } from "../constants.js";
+import { ACCENT, CARD, CP_BG, CP_COLOR, ESTADOS_PAGO, FONT_BODY, FONT_HEAD, FONT_MONO, HILITE_BG, INK, INK_SOFT, LINE, MUTED, PAGADO, PAPER, labelTarifaTipo } from "../constants.js";
 import { esMultiDia, fechasEvento, fmtFechaCorta, fmtMoney, fmtRangoFecha, slugArchivo } from "../utils/helpers.js";
 import { checklistTexto, textoJefeAreas, waLink } from "../utils/texto.js";
 import { totalItemsEvento } from "../utils/eventHelpers.js";
@@ -9,6 +9,16 @@ export function FichaCompleta({ ev, jefeAreas, isAdmin, onEdit, onVaucher, onCro
   const cronoOrdenado = (ev.cronograma || []).slice().sort((a, b) => (a.hora || "").localeCompare(b.hora || ""));
   const fichaRef = useRef(null);
   const [generandoPDF, setGenerandoPDF] = useState(false);
+
+  // En eventos de varios días, la comida (Vale/Comanda) está cargada por día dentro de
+  // ev.dias; acá se junta todo en una sola lista (con la fecha de cada ítem) para mostrarla.
+  const multiDiaFicha = esMultiDia(ev) && (ev.dias || []).length > 0;
+  const tiposValeFicha = multiDiaFicha
+    ? ev.dias.flatMap(d => (d.valeTipos || []).map(t => ({ ...t, fecha: d.fecha })))
+    : (ev.vale?.tipos || []);
+  const itemsComandaFicha = multiDiaFicha
+    ? ev.dias.flatMap(d => (d.comandaItems || []).map(it => ({ ...it, fecha: d.fecha })))
+    : (ev.comanda?.items || []);
 
   const nombreFicha = () => {
     const num = ev.numeracion?.ficha || "0000";
@@ -56,8 +66,34 @@ export function FichaCompleta({ ev, jefeAreas, isAdmin, onEdit, onVaucher, onCro
 
       {ev.servicio && <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}><b>Concepto:</b> {ev.servicio}</p>}
       {checklistTexto(ev) && <p style={{ fontFamily: FONT_BODY, fontSize: 13, color: MUTED, marginBottom: 6 }}>{checklistTexto(ev)}</p>}
-      {ev.tarifaTipo && <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}><b>Tarifa:</b> {ev.tarifaTipo === "completa" ? "Completa" : "Media tarifa"}{ev.tarifaEspecialActiva ? " (tarifa especial aplicada)" : ""}{esMultiDia(ev) ? ` · ${fechasEvento(ev).length} días de salón` : ""}</p>}
-      {ev.salonAdicional && <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}><b>Salón adicional:</b> {ev.salonAdicional} — {ev.tarifaTipoAdicional === "completa" ? "Completa" : "Media tarifa"}{ev.tarifaEspecialActivaAdicional ? " (tarifa especial aplicada)" : ""}</p>}
+      {!esMultiDia(ev) && ev.tarifaTipo && <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}><b>Tarifa:</b> {labelTarifaTipo(ev.tarifaTipo)}{ev.tarifaEspecialActiva ? " (tarifa especial aplicada)" : ""}</p>}
+      {!esMultiDia(ev) && ev.salonAdicional && <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}><b>Salón adicional:</b> {ev.salonAdicional} — {labelTarifaTipo(ev.tarifaTipoAdicional)}{ev.tarifaEspecialActivaAdicional ? " (tarifa especial aplicada)" : ""}</p>}
+
+      {/* ---- Desglose por día: salón, tarifa y comida de cada día del evento ---- */}
+      {esMultiDia(ev) && (ev.dias || []).length > 0 && (
+        <div className="p-3 rounded mb-4" style={{ background: HILITE_BG, border: `1px solid ${LINE}` }}>
+          <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: MUTED, marginBottom: 8, fontWeight: 600 }}>Desglose día por día ({ev.dias.length} días)</p>
+          <div className="flex flex-col gap-2">
+            {ev.dias.map(d => {
+              const cubiertosDia = (d.valeTipos || []).reduce((s, t) => s + (Number(t.cantidad) || 0), 0);
+              return (
+                <div key={d.fecha} className="p-2.5 rounded" style={{ background: CARD, border: `1px solid ${LINE}` }}>
+                  <p style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK, fontWeight: 700, marginBottom: 3 }}>{d.fecha}</p>
+                  <p style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: INK, marginBottom: 2 }}>
+                    <b>Salón:</b> {d.salon || "-"} · <b>Tarifa:</b> {labelTarifaTipo(d.tarifaTipo)}{d.tarifaEspecialActiva ? " (especial)" : ""}
+                    {d.salonAdicionalActivo && d.salonAdicional ? ` · + ${d.salonAdicional} (${labelTarifaTipo(d.tarifaTipoAdicional)}${d.tarifaEspecialActivaAdicional ? ", especial" : ""})` : ""}
+                  </p>
+                  <p style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: MUTED }}>
+                    {(d.valeTipos || []).length > 0
+                      ? `Comida: ${d.valeTipos.map(t => `${t.cantidad} × ${t.tipo}`).join(", ")} (${cubiertosDia} cubiertos)`
+                      : "Sin comida cargada para este día."}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
       {(ev.horaArmado || ev.horaDesarme) && (
         <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}>
           {ev.horaArmado && <><b>Armado:</b> {ev.horaArmado} </>}{ev.horaDesarme && <><b>· Desarme:</b> {ev.horaDesarme}</>}
@@ -180,11 +216,11 @@ export function FichaCompleta({ ev, jefeAreas, isAdmin, onEdit, onVaucher, onCro
         <p style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK, marginBottom: 8 }}>
           <b>N° de vale:</b> {ev.vale?.numero || "-"} · <b>Salones vendidos:</b> {ev.vale?.salonesVendidos || "1"}
         </p>
-        {(ev.vale?.tipos || []).length > 0 ? (
+        {tiposValeFicha.length > 0 ? (
           <div className="flex flex-col gap-2">
-            {ev.vale.tipos.map(t => (
-              <div key={t.id} className="p-2.5 rounded" style={{ background: CARD, border: `1px solid ${LINE}` }}>
-                <div style={{ fontFamily: FONT_BODY, fontSize: 13.5, color: INK, fontWeight: 600 }}>{t.tipo}</div>
+            {tiposValeFicha.map(t => (
+              <div key={`${t.fecha || ""}-${t.id}`} className="p-2.5 rounded" style={{ background: CARD, border: `1px solid ${LINE}` }}>
+                <div style={{ fontFamily: FONT_BODY, fontSize: 13.5, color: INK, fontWeight: 600 }}>{t.tipo}{t.fecha ? ` — ${t.fecha}` : ""}</div>
                 <div className="grid grid-cols-2 gap-x-3 gap-y-1 mt-1.5" style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: INK }}>
                   <div><span style={{ color: MUTED }}>Cantidad: </span>{t.cantidad}</div>
                   <div><span style={{ color: MUTED }}>Valor uni.: </span>$ {fmtMoney(Number(t.valorUnitario))}</div>
@@ -194,8 +230,8 @@ export function FichaCompleta({ ev, jefeAreas, isAdmin, onEdit, onVaucher, onCro
               </div>
             ))}
             <div className="p-2.5 rounded flex items-center justify-between" style={{ background: HILITE_BG, border: `1px solid ${CP_COLOR}` }}>
-              <span style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK, fontWeight: 700 }}>TOTAL cubiertos vendidos: {ev.vale.tipos.reduce((s, t) => s + (Number(t.cantidad) || 0), 0)}</span>
-              <span style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK, fontWeight: 700 }}>$ {fmtMoney(ev.vale.tipos.reduce((s, t) => s + (Number(t.cantidad) || 0) * (Number(t.valorUnitario) || 0), 0))}</span>
+              <span style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK, fontWeight: 700 }}>TOTAL cubiertos vendidos: {tiposValeFicha.reduce((s, t) => s + (Number(t.cantidad) || 0), 0)}</span>
+              <span style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK, fontWeight: 700 }}>$ {fmtMoney(tiposValeFicha.reduce((s, t) => s + (Number(t.cantidad) || 0) * (Number(t.valorUnitario) || 0), 0))}</span>
             </div>
           </div>
         ) : <p style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: MUTED }}>Sin tipos de cubiertos cargados en el Vale.</p>}
@@ -207,18 +243,20 @@ export function FichaCompleta({ ev, jefeAreas, isAdmin, onEdit, onVaucher, onCro
         <p style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK, marginBottom: 8 }}>
           <b>Cubiertos a preparar:</b> {ev.comanda?.cubiertos || "-"} {ev.comanda?.caterer ? <>· <b>Catering:</b> {ev.comanda.caterer}</> : ""}
         </p>
-        {(ev.comanda?.items || []).length > 0 ? (
+        {itemsComandaFicha.length > 0 ? (
           <table className="w-full mb-2" style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: INK, borderCollapse: "collapse" }}>
             <thead>
               <tr style={{ borderBottom: `1px solid ${LINE}` }}>
+                {multiDiaFicha && <th className="text-left py-1">Día</th>}
                 <th className="text-left py-1">Ítem</th>
                 <th className="text-left py-1">Detalle</th>
                 <th className="text-right py-1">Cant.</th>
               </tr>
             </thead>
             <tbody>
-              {ev.comanda.items.map(it => (
-                <tr key={it.id} style={{ borderBottom: `1px solid ${LINE}` }}>
+              {itemsComandaFicha.map(it => (
+                <tr key={`${it.fecha || ""}-${it.id}`} style={{ borderBottom: `1px solid ${LINE}` }}>
+                  {multiDiaFicha && <td className="py-1">{it.fecha}</td>}
                   <td className="py-1">{it.nombre}</td>
                   <td className="py-1">{it.detalle}</td>
                   <td className="text-right py-1">{it.cantidad}</td>

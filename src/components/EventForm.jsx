@@ -1,7 +1,7 @@
-import React, { useState } from "react";
-import { ACCENT, CARD, CATERING_SUGERIDOS, COLORES_EVENTO, CONDICIONES_IVA, CP_BG, CP_COLOR, ESTADOS_PAGO, FONT_BODY, FONT_HEAD, FONT_MONO, FRANJAS_HORARIAS, HILITE_BG, INK, INK_SOFT, LINE, MUTED, PAPER, PARCIAL, PARCIAL_BG, PENDIENTE, SALONES_FIJOS, TECNICA_SUGERIDOS, TIPOS_FACTURA, VALE_TIPOS } from "../constants.js";
+import React, { useEffect, useState } from "react";
+import { ACCENT, CARD, CATERING_SUGERIDOS, COLORES_EVENTO, CONDICIONES_IVA, CP_BG, CP_COLOR, ESTADOS_PAGO, FONT_BODY, FONT_HEAD, FONT_MONO, FRANJAS_HORARIAS, HILITE_BG, INK, INK_SOFT, LINE, MUTED, PAPER, PARCIAL, PARCIAL_BG, PENDIENTE, SALONES_FIJOS, TARIFA_TIPOS, TECNICA_SUGERIDOS, TIPOS_FACTURA, VALE_TIPOS } from "../constants.js";
 import { esMultiDia, fechasEvento, fmtFecha, fmtMoney, fmtRangoFecha, uid } from "../utils/helpers.js";
-import { blankEvent, totalItemsEvento } from "../utils/eventHelpers.js";
+import { blankDia, blankEvent, sincronizarDias, totalItemsEvento } from "../utils/eventHelpers.js";
 import { Field, HoraField, Toggle, inputStyle } from "./common.jsx";
 
 export function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
@@ -21,6 +21,78 @@ export function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
   const set = (k, v) => setEv(prev => ({ ...prev, [k]: v }));
   const setVale = (k, v) => setEv(prev => ({ ...prev, vale: { ...prev.vale, [k]: v } }));
   const setComanda = (k, v) => setEv(prev => ({ ...prev, comanda: { ...prev.comanda, [k]: v } }));
+
+  // ─── Desglose por día (eventos de varios días) ───────────────────────────
+  // Cada vez que cambia el rango de fechas (fecha/fechaFin), se agregan o quitan
+  // entradas de ev.dias para que siempre haya exactamente una por día del evento.
+  useEffect(() => {
+    if (!esMultiDia(ev)) return;
+    const sincronizados = sincronizarDias(ev);
+    const cambio = sincronizados.length !== (ev.dias || []).length
+      || sincronizados.some((d, i) => d.fecha !== ev.dias?.[i]?.fecha);
+    if (cambio) setEv(prev => ({ ...prev, dias: sincronizados }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ev.fecha, ev.fechaFin]);
+
+  const [diaActivo, setDiaActivo] = useState(0);
+  const dias = ev.dias || [];
+  const diaSel = dias[diaActivo] || dias[0];
+
+  const setDia = (idx, campo, valor) => setEv(prev => ({
+    ...prev, dias: prev.dias.map((d, i) => i === idx ? { ...d, [campo]: valor } : d),
+  }));
+
+  const [nuevoTipoCubiertoDia, setNuevoTipoCubiertoDia] = useState({ tipo: VALE_TIPOS[0], cantidad: "", valorUnitario: "", comentario: "" });
+  const agregarTipoCubiertoDia = (idx) => {
+    if (!nuevoTipoCubiertoDia.cantidad || !nuevoTipoCubiertoDia.valorUnitario) return;
+    setEv(prev => ({
+      ...prev,
+      dias: prev.dias.map((d, i) => i === idx ? { ...d, valeTipos: [...(d.valeTipos || []), { id: uid(), ...nuevoTipoCubiertoDia }] } : d),
+    }));
+    setNuevoTipoCubiertoDia({ tipo: VALE_TIPOS[0], cantidad: "", valorUnitario: "", comentario: "" });
+  };
+  const quitarTipoCubiertoDia = (idx, id) => {
+    if (!window.confirm("¿Seguro que querés quitar este ítem del vale de ese día?")) return;
+    setEv(prev => ({
+      ...prev,
+      dias: prev.dias.map((d, i) => i === idx ? { ...d, valeTipos: (d.valeTipos || []).filter(t => t.id !== id) } : d),
+    }));
+  };
+
+  const [nuevoItemComandaDia, setNuevoItemComandaDia] = useState({ nombre: "", detalle: "", cantidad: "" });
+  const agregarItemComandaDia = (idx) => {
+    if (!nuevoItemComandaDia.nombre.trim()) return;
+    setEv(prev => ({
+      ...prev,
+      dias: prev.dias.map((d, i) => i === idx ? { ...d, comandaItems: [...(d.comandaItems || []), { id: uid(), ...nuevoItemComandaDia }] } : d),
+    }));
+    setNuevoItemComandaDia({ nombre: "", detalle: "", cantidad: "" });
+  };
+  const quitarItemComandaDia = (idx, id) => setEv(prev => ({
+    ...prev,
+    dias: prev.dias.map((d, i) => i === idx ? { ...d, comandaItems: (d.comandaItems || []).filter(it => it.id !== id) } : d),
+  }));
+
+  // Valor de salón (y salón adicional) resuelto para un día en particular, igual mecanismo
+  // que para el evento de un solo día: tarifa especial > tarifario según tipo > $0 si es cortesía.
+  const valorDiaSalon = (d) => {
+    if (!d) return 0;
+    if (d.tarifaTipo === "cortesia") return 0;
+    if (d.tarifaEspecialActiva) return Number(d.tarifaEspecial) || 0;
+    const salonFinalDia = d.salon === "Otro" ? d.salonOtro : d.salon;
+    const t = tarifas?.[salonFinalDia];
+    const valor = d.tarifaTipo === "media" ? t?.media : t?.completa;
+    return Number(valor) || 0;
+  };
+  const valorDiaSalonAdicional = (d) => {
+    if (!d || !d.salonAdicionalActivo) return 0;
+    if (d.tarifaTipoAdicional === "cortesia") return 0;
+    if (d.tarifaEspecialActivaAdicional) return Number(d.tarifaEspecialAdicional) || 0;
+    const salonFinalDia = d.salonAdicional === "Otro" ? d.salonAdicionalOtro : d.salonAdicional;
+    const t = tarifas?.[salonFinalDia];
+    const valor = d.tarifaTipoAdicional === "media" ? t?.media : t?.completa;
+    return Number(valor) || 0;
+  };
 
   const registrarHistorial = (accion) => {
     setEv(prev => ({ ...prev, historial: [...(prev.historial || []), { id: uid(), fecha: new Date().toISOString(), accion }] }));
@@ -106,26 +178,53 @@ export function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
 
   const salonFinal = ev.salon === "Otro" ? ev.salonOtro : ev.salon;
   const tarifaSalon = tarifas?.[salonFinal];
-  const tarifaValor = ev.tarifaTipo === "completa" ? tarifaSalon?.completa : tarifaSalon?.media;
+  const tarifaValor = ev.tarifaTipo === "media" ? tarifaSalon?.media : tarifaSalon?.completa;
 
   // Valor de salón que se va a aplicar y congelar en esta ficha (histórico):
   // si ya existía un valorSalon guardado (evento ya creado) y la tarifa especial/tipo no cambió,
   // se respeta; si es un evento nuevo o se tocó la tarifa, se recalcula una sola vez al guardar.
-  const valorSalonAplicar = ev.tarifaEspecialActiva ? (Number(ev.tarifaEspecial) || 0) : (Number(tarifaValor) || 0);
+  // "Cortesía" siempre vale $0, sin ir a buscar el tarifario.
+  const valorSalonAplicar = ev.tarifaTipo === "cortesia" ? 0 : (ev.tarifaEspecialActiva ? (Number(ev.tarifaEspecial) || 0) : (Number(tarifaValor) || 0));
 
   // Mismo mecanismo, para el salón adicional (uso simultáneo de un segundo salón en el evento).
   const salonAdicionalFinal = ev.salonAdicionalActivo ? (ev.salonAdicional === "Otro" ? ev.salonAdicionalOtro : ev.salonAdicional) : "";
   const tarifaSalonAdicional = tarifas?.[salonAdicionalFinal];
-  const tarifaValorAdicional = ev.tarifaTipoAdicional === "completa" ? tarifaSalonAdicional?.completa : tarifaSalonAdicional?.media;
-  const valorSalonAdicionalAplicar = ev.tarifaEspecialActivaAdicional ? (Number(ev.tarifaEspecialAdicional) || 0) : (Number(tarifaValorAdicional) || 0);
+  const tarifaValorAdicional = ev.tarifaTipoAdicional === "media" ? tarifaSalonAdicional?.media : tarifaSalonAdicional?.completa;
+  const valorSalonAdicionalAplicar = ev.tarifaTipoAdicional === "cortesia" ? 0 : (ev.tarifaEspecialActivaAdicional ? (Number(ev.tarifaEspecialAdicional) || 0) : (Number(tarifaValorAdicional) || 0));
 
   const cantDias = fechasEvento(ev).length;
+  const multiDia = esMultiDia(ev);
 
-  const guardar = () => onSave({
-    ...ev,
-    salon: salonFinal, valorSalon: valorSalonAplicar,
-    salonAdicional: salonAdicionalFinal, valorSalonAdicional: salonAdicionalFinal ? valorSalonAdicionalAplicar : "",
-  });
+  // Para previsualizar el total mientras se edita un evento de varios días, hace falta
+  // calcular en el momento el valor de cada día (todavía no está "congelado" hasta guardar).
+  const evParaTotal = multiDia
+    ? { ...ev, dias: dias.map(d => ({ ...d, valorSalon: valorDiaSalon(d), valorSalonAdicional: d.salonAdicionalActivo ? valorDiaSalonAdicional(d) : "" })) }
+    : ev;
+
+  const guardar = () => {
+    if (multiDia) {
+      // Congela, para cada día del desglose, el salón final (resolviendo "Otro") y el
+      // valor de salón/salón adicional que corresponda según su propia tarifa/cortesía.
+      const diasCongelados = dias.map(d => ({
+        ...d,
+        salon: d.salon === "Otro" ? d.salonOtro : d.salon,
+        valorSalon: valorDiaSalon(d),
+        salonAdicional: d.salonAdicionalActivo ? (d.salonAdicional === "Otro" ? d.salonAdicionalOtro : d.salonAdicional) : "",
+        valorSalonAdicional: d.salonAdicionalActivo ? valorDiaSalonAdicional(d) : "",
+      }));
+      // El salón "de referencia" del evento (para listados/calendario) es el del primer día,
+      // o "Varios salones" si cambia de un día a otro.
+      const salonesUnicos = [...new Set(diasCongelados.map(d => d.salon).filter(Boolean))];
+      const salonReferencia = salonesUnicos.length > 1 ? "Varios salones" : (salonesUnicos[0] || "");
+      onSave({ ...ev, dias: diasCongelados, salon: salonReferencia });
+      return;
+    }
+    onSave({
+      ...ev,
+      salon: salonFinal, valorSalon: valorSalonAplicar,
+      salonAdicional: salonAdicionalFinal, valorSalonAdicional: salonAdicionalFinal ? valorSalonAdicionalAplicar : "",
+    });
+  };
 
   return (
     <div className="p-5 rounded" style={{ background: CARD, border: `1px solid ${LINE}` }}>
@@ -182,68 +281,177 @@ export function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
         </div>
       </Field>
 
-      <Field label="Tarifa del salón">
-        <div className="flex gap-3 items-center flex-wrap">
-          <label className="flex items-center gap-1.5"><input type="radio" disabled={ev.tarifaEspecialActiva} checked={ev.tarifaTipo === "completa"} onChange={() => set("tarifaTipo", "completa")} /><span style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK }}>Tarifa completa</span></label>
-          <label className="flex items-center gap-1.5"><input type="radio" disabled={ev.tarifaEspecialActiva} checked={ev.tarifaTipo === "media"} onChange={() => set("tarifaTipo", "media")} /><span style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK }}>Media tarifa</span></label>
-          {salonFinal && !ev.tarifaEspecialActiva && (
-            <span style={{ fontFamily: FONT_MONO, fontSize: 12.5, color: ACCENT, marginLeft: "auto" }}>
-              {tarifaValor ? `$ ${fmtMoney(tarifaValor)}` : "Sin tarifa configurada en Ajustes"}
-            </span>
-          )}
-        </div>
-        <div className="mt-2 p-2.5 rounded" style={{ background: HILITE_BG, border: `1px solid ${LINE}` }}>
-          <label className="flex items-center gap-1.5 mb-2">
-            <input type="checkbox" checked={!!ev.tarifaEspecialActiva} onChange={e => set("tarifaEspecialActiva", e.target.checked)} />
-            <span style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK, fontWeight: 600 }}>Usar tarifa especial (ignora el tarifario base)</span>
-          </label>
-          {ev.tarifaEspecialActiva && (
-            <input type="number" style={inputStyle} value={ev.tarifaEspecial} onChange={e => set("tarifaEspecial", e.target.value)} placeholder="Valor especial del salón $ (precio final, con IVA incluido)" />
-          )}
-        </div>
-        <p style={{ fontFamily: FONT_BODY, fontSize: 11, color: MUTED, marginTop: 6 }}>
-          El valor de salón que quede aplicado (especial o de tarifario) se guarda tal cual con la ficha: si el tarifario general cambia más adelante, este evento ya realizado no se ve afectado.
-          {cantDias > 1 && ` Como el evento dura ${cantDias} días de salón (${fmtFecha(ev.fecha)} al ${fmtFecha(ev.fechaFin)}), la tarifa se cobra automáticamente ${cantDias} veces (una por día) — no hace falta cargarla a mano.`}
-        </p>
-      </Field>
+      {multiDia ? (
+        <Field label={`Salón y tarifa, día por día (${cantDias} días: ${fmtRangoFecha(ev)})`}>
+          <p style={{ fontFamily: FONT_BODY, fontSize: 11.5, color: MUTED, marginBottom: 8 }}>
+            Elegí el día que querés configurar. Cada día puede tener su propio salón, su propia tarifa (completa, media o cortesía) y, más abajo, su propia comida.
+          </p>
+          <div className="flex gap-1.5 flex-wrap mb-3">
+            {dias.map((d, i) => (
+              <button type="button" key={d.fecha} onClick={() => setDiaActivo(i)}
+                className="text-xs px-2.5 py-1.5 rounded"
+                style={{ fontFamily: FONT_BODY, border: `1px solid ${diaActivo === i ? ACCENT : LINE}`, background: diaActivo === i ? ACCENT : CARD, color: diaActivo === i ? "#fff" : INK, fontWeight: 600 }}>
+                {fmtFecha(d.fecha).split(" de ")[0]}
+              </button>
+            ))}
+          </div>
 
-      <Field label="Salón adicional (uso simultáneo de un segundo salón)">
-        <div className="p-2.5 rounded" style={{ background: HILITE_BG, border: `1px solid ${LINE}` }}>
-          <label className="flex items-center gap-1.5 mb-2">
-            <input type="checkbox" checked={!!ev.salonAdicionalActivo} onChange={e => set("salonAdicionalActivo", e.target.checked)} />
-            <span style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK, fontWeight: 600 }}>Este evento usa un salón más en simultáneo (ej: sala de reunión + salón de capacitación al mismo tiempo)</span>
-          </label>
-          {ev.salonAdicionalActivo && (
-            <>
-              <select style={inputStyle} value={ev.salonAdicional} onChange={e => set("salonAdicional", e.target.value)}>
-                <option value="">Elegir salón adicional…</option>
-                {SALONES_FIJOS.filter(s => s !== salonFinal).map(s => <option key={s} value={s}>{s}</option>)}
+          {diaSel && (
+            <div className="p-3 rounded" style={{ background: HILITE_BG, border: `1px solid ${LINE}` }}>
+              <p style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: INK, fontWeight: 700, marginBottom: 8 }}>{fmtFecha(diaSel.fecha)}</p>
+
+              <select style={{ ...inputStyle, marginBottom: 8 }} value={diaSel.salon} onChange={e => setDia(diaActivo, "salon", e.target.value)}>
+                <option value="">Elegir salón…</option>
+                {SALONES_FIJOS.map(s => <option key={s} value={s}>{s}</option>)}
                 <option value="Otro">Otro…</option>
               </select>
-              {ev.salonAdicional === "Otro" && <input style={{ ...inputStyle, marginTop: 8 }} placeholder="Nombre del salón adicional" value={ev.salonAdicionalOtro} onChange={e => set("salonAdicionalOtro", e.target.value)} />}
-              <div className="flex gap-3 items-center flex-wrap mt-2">
-                <label className="flex items-center gap-1.5"><input type="radio" disabled={ev.tarifaEspecialActivaAdicional} checked={ev.tarifaTipoAdicional === "completa"} onChange={() => set("tarifaTipoAdicional", "completa")} /><span style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK }}>Tarifa completa</span></label>
-                <label className="flex items-center gap-1.5"><input type="radio" disabled={ev.tarifaEspecialActivaAdicional} checked={ev.tarifaTipoAdicional === "media"} onChange={() => set("tarifaTipoAdicional", "media")} /><span style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK }}>Media tarifa</span></label>
-                {salonAdicionalFinal && !ev.tarifaEspecialActivaAdicional && (
-                  <span style={{ fontFamily: FONT_MONO, fontSize: 12.5, color: ACCENT, marginLeft: "auto" }}>
-                    {tarifaValorAdicional ? `$ ${fmtMoney(tarifaValorAdicional)}` : "Sin tarifa configurada en Ajustes"}
-                  </span>
+              {diaSel.salon === "Otro" && <input style={{ ...inputStyle, marginBottom: 8 }} placeholder="Nombre del salón" value={diaSel.salonOtro} onChange={e => setDia(diaActivo, "salonOtro", e.target.value)} />}
+
+              <div className="flex gap-3 items-center flex-wrap mb-2">
+                {TARIFA_TIPOS.map(t => (
+                  <label key={t.value} className="flex items-center gap-1.5">
+                    <input type="radio" disabled={diaSel.tarifaEspecialActiva} checked={diaSel.tarifaTipo === t.value} onChange={() => setDia(diaActivo, "tarifaTipo", t.value)} />
+                    <span style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK }}>{t.label}</span>
+                  </label>
+                ))}
+                {diaSel.salon && diaSel.tarifaTipo !== "cortesia" && !diaSel.tarifaEspecialActiva && (
+                  <span style={{ fontFamily: FONT_MONO, fontSize: 12.5, color: ACCENT, marginLeft: "auto" }}>$ {fmtMoney(valorDiaSalon(diaSel))}</span>
                 )}
               </div>
-              <label className="flex items-center gap-1.5 mt-2">
-                <input type="checkbox" checked={!!ev.tarifaEspecialActivaAdicional} onChange={e => set("tarifaEspecialActivaAdicional", e.target.checked)} />
-                <span style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK, fontWeight: 600 }}>Usar tarifa especial para el salón adicional</span>
-              </label>
-              {ev.tarifaEspecialActivaAdicional && (
-                <input type="number" style={{ ...inputStyle, marginTop: 6 }} value={ev.tarifaEspecialAdicional} onChange={e => set("tarifaEspecialAdicional", e.target.value)} placeholder="Valor especial del salón adicional $ (precio final, con IVA incluido)" />
+              {diaSel.tarifaTipo !== "cortesia" && (
+                <div className="p-2 rounded mb-2" style={{ background: CARD, border: `1px solid ${LINE}` }}>
+                  <label className="flex items-center gap-1.5 mb-2">
+                    <input type="checkbox" checked={!!diaSel.tarifaEspecialActiva} onChange={e => setDia(diaActivo, "tarifaEspecialActiva", e.target.checked)} />
+                    <span style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: INK, fontWeight: 600 }}>Tarifa especial para este día</span>
+                  </label>
+                  {diaSel.tarifaEspecialActiva && (
+                    <input type="number" style={inputStyle} value={diaSel.tarifaEspecial} onChange={e => setDia(diaActivo, "tarifaEspecial", e.target.value)} placeholder="Valor especial $ (con IVA incluido)" />
+                  )}
+                </div>
               )}
-              <p style={{ fontFamily: FONT_BODY, fontSize: 11, color: MUTED, marginTop: 6 }}>
-                Se suma solo en la cotización, con la misma cantidad de días que el salón principal{cantDias > 1 ? ` (${cantDias} días)` : ""}.
-              </p>
-            </>
+
+              <label className="flex items-center gap-1.5 mb-2 mt-2">
+                <input type="checkbox" checked={!!diaSel.salonAdicionalActivo} onChange={e => setDia(diaActivo, "salonAdicionalActivo", e.target.checked)} />
+                <span style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: INK, fontWeight: 600 }}>Este día usa un salón más en simultáneo</span>
+              </label>
+              {diaSel.salonAdicionalActivo && (
+                <div className="p-2 rounded" style={{ background: CARD, border: `1px solid ${LINE}` }}>
+                  <select style={{ ...inputStyle, marginBottom: 8 }} value={diaSel.salonAdicional} onChange={e => setDia(diaActivo, "salonAdicional", e.target.value)}>
+                    <option value="">Elegir salón adicional…</option>
+                    {SALONES_FIJOS.filter(s => s !== diaSel.salon).map(s => <option key={s} value={s}>{s}</option>)}
+                    <option value="Otro">Otro…</option>
+                  </select>
+                  {diaSel.salonAdicional === "Otro" && <input style={{ ...inputStyle, marginBottom: 8 }} placeholder="Nombre del salón adicional" value={diaSel.salonAdicionalOtro} onChange={e => setDia(diaActivo, "salonAdicionalOtro", e.target.value)} />}
+                  <div className="flex gap-3 items-center flex-wrap mb-2">
+                    {TARIFA_TIPOS.map(t => (
+                      <label key={t.value} className="flex items-center gap-1.5">
+                        <input type="radio" disabled={diaSel.tarifaEspecialActivaAdicional} checked={diaSel.tarifaTipoAdicional === t.value} onChange={() => setDia(diaActivo, "tarifaTipoAdicional", t.value)} />
+                        <span style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK }}>{t.label}</span>
+                      </label>
+                    ))}
+                    {diaSel.salonAdicional && diaSel.tarifaTipoAdicional !== "cortesia" && !diaSel.tarifaEspecialActivaAdicional && (
+                      <span style={{ fontFamily: FONT_MONO, fontSize: 12.5, color: ACCENT, marginLeft: "auto" }}>$ {fmtMoney(valorDiaSalonAdicional(diaSel))}</span>
+                    )}
+                  </div>
+                  {diaSel.tarifaTipoAdicional !== "cortesia" && (
+                    <>
+                      <label className="flex items-center gap-1.5 mb-2">
+                        <input type="checkbox" checked={!!diaSel.tarifaEspecialActivaAdicional} onChange={e => setDia(diaActivo, "tarifaEspecialActivaAdicional", e.target.checked)} />
+                        <span style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: INK, fontWeight: 600 }}>Tarifa especial para el salón adicional</span>
+                      </label>
+                      {diaSel.tarifaEspecialActivaAdicional && (
+                        <input type="number" style={inputStyle} value={diaSel.tarifaEspecialAdicional} onChange={e => setDia(diaActivo, "tarifaEspecialAdicional", e.target.value)} placeholder="Valor especial $ (con IVA incluido)" />
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
           )}
-        </div>
-      </Field>
+          <p style={{ fontFamily: FONT_BODY, fontSize: 11, color: MUTED, marginTop: 6 }}>
+            El valor de cada día se congela al guardar la ficha, igual que en un evento de un solo día: si el tarifario cambia más adelante, no afecta a este evento ya cargado.
+          </p>
+        </Field>
+      ) : (
+        <>
+          <Field label="Tarifa del salón">
+            <div className="flex gap-3 items-center flex-wrap">
+              {TARIFA_TIPOS.map(t => (
+                <label key={t.value} className="flex items-center gap-1.5">
+                  <input type="radio" disabled={ev.tarifaEspecialActiva} checked={ev.tarifaTipo === t.value} onChange={() => set("tarifaTipo", t.value)} />
+                  <span style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK }}>{t.label}</span>
+                </label>
+              ))}
+              {salonFinal && ev.tarifaTipo !== "cortesia" && !ev.tarifaEspecialActiva && (
+                <span style={{ fontFamily: FONT_MONO, fontSize: 12.5, color: ACCENT, marginLeft: "auto" }}>
+                  {tarifaValor ? `$ ${fmtMoney(tarifaValor)}` : "Sin tarifa configurada en Ajustes"}
+                </span>
+              )}
+            </div>
+            {ev.tarifaTipo !== "cortesia" && (
+              <div className="mt-2 p-2.5 rounded" style={{ background: HILITE_BG, border: `1px solid ${LINE}` }}>
+                <label className="flex items-center gap-1.5 mb-2">
+                  <input type="checkbox" checked={!!ev.tarifaEspecialActiva} onChange={e => set("tarifaEspecialActiva", e.target.checked)} />
+                  <span style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK, fontWeight: 600 }}>Usar tarifa especial (ignora el tarifario base)</span>
+                </label>
+                {ev.tarifaEspecialActiva && (
+                  <input type="number" style={inputStyle} value={ev.tarifaEspecial} onChange={e => set("tarifaEspecial", e.target.value)} placeholder="Valor especial del salón $ (precio final, con IVA incluido)" />
+                )}
+              </div>
+            )}
+            <p style={{ fontFamily: FONT_BODY, fontSize: 11, color: MUTED, marginTop: 6 }}>
+              El valor de salón que quede aplicado (especial o de tarifario) se guarda tal cual con la ficha: si el tarifario general cambia más adelante, este evento ya realizado no se ve afectado.
+              {" "}Si tu evento dura varios días con distinta tarifa o salón cada día, cargá primero la "Fecha de fin" arriba: va a aparecer un editor día por día en lugar de este bloque.
+            </p>
+          </Field>
+
+          <Field label="Salón adicional (uso simultáneo de un segundo salón)">
+            <div className="p-2.5 rounded" style={{ background: HILITE_BG, border: `1px solid ${LINE}` }}>
+              <label className="flex items-center gap-1.5 mb-2">
+                <input type="checkbox" checked={!!ev.salonAdicionalActivo} onChange={e => set("salonAdicionalActivo", e.target.checked)} />
+                <span style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK, fontWeight: 600 }}>Este evento usa un salón más en simultáneo (ej: sala de reunión + salón de capacitación al mismo tiempo)</span>
+              </label>
+              {ev.salonAdicionalActivo && (
+                <>
+                  <select style={inputStyle} value={ev.salonAdicional} onChange={e => set("salonAdicional", e.target.value)}>
+                    <option value="">Elegir salón adicional…</option>
+                    {SALONES_FIJOS.filter(s => s !== salonFinal).map(s => <option key={s} value={s}>{s}</option>)}
+                    <option value="Otro">Otro…</option>
+                  </select>
+                  {ev.salonAdicional === "Otro" && <input style={{ ...inputStyle, marginTop: 8 }} placeholder="Nombre del salón adicional" value={ev.salonAdicionalOtro} onChange={e => set("salonAdicionalOtro", e.target.value)} />}
+                  <div className="flex gap-3 items-center flex-wrap mt-2">
+                    {TARIFA_TIPOS.map(t => (
+                      <label key={t.value} className="flex items-center gap-1.5">
+                        <input type="radio" disabled={ev.tarifaEspecialActivaAdicional} checked={ev.tarifaTipoAdicional === t.value} onChange={() => set("tarifaTipoAdicional", t.value)} />
+                        <span style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK }}>{t.label}</span>
+                      </label>
+                    ))}
+                    {salonAdicionalFinal && ev.tarifaTipoAdicional !== "cortesia" && !ev.tarifaEspecialActivaAdicional && (
+                      <span style={{ fontFamily: FONT_MONO, fontSize: 12.5, color: ACCENT, marginLeft: "auto" }}>
+                        {tarifaValorAdicional ? `$ ${fmtMoney(tarifaValorAdicional)}` : "Sin tarifa configurada en Ajustes"}
+                      </span>
+                    )}
+                  </div>
+                  {ev.tarifaTipoAdicional !== "cortesia" && (
+                    <>
+                      <label className="flex items-center gap-1.5 mt-2">
+                        <input type="checkbox" checked={!!ev.tarifaEspecialActivaAdicional} onChange={e => set("tarifaEspecialActivaAdicional", e.target.checked)} />
+                        <span style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK, fontWeight: 600 }}>Usar tarifa especial para el salón adicional</span>
+                      </label>
+                      {ev.tarifaEspecialActivaAdicional && (
+                        <input type="number" style={{ ...inputStyle, marginTop: 6 }} value={ev.tarifaEspecialAdicional} onChange={e => set("tarifaEspecialAdicional", e.target.value)} placeholder="Valor especial del salón adicional $ (precio final, con IVA incluido)" />
+                      )}
+                    </>
+                  )}
+                  <p style={{ fontFamily: FONT_BODY, fontSize: 11, color: MUTED, marginTop: 6 }}>
+                    Se suma solo en la cotización.
+                  </p>
+                </>
+              )}
+            </div>
+          </Field>
+        </>
+      )}
 
       <Field label="Incluye (catering / comida)">
         <div className="flex flex-wrap gap-2 mb-2">
@@ -366,30 +574,12 @@ export function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
             </tr>
           </thead>
           <tbody>
-            {salonFinal && (
-              <tr style={{ borderBottom: `1px solid ${LINE}`, opacity: 0.85 }}>
-                <td className="py-1">Salón ({salonFinal}) — automático{cantDias > 1 ? ` (${cantDias} días)` : ""}</td>
-                <td className="text-right py-1">{cantDias}</td>
-                <td className="text-right py-1">$ {fmtMoney(valorSalonAplicar)}</td>
-                <td className="text-right py-1">$ {fmtMoney(valorSalonAplicar * cantDias)}</td>
-                <td></td>
-              </tr>
-            )}
-            {salonAdicionalFinal && (
-              <tr style={{ borderBottom: `1px solid ${LINE}`, opacity: 0.85 }}>
-                <td className="py-1">Salón adicional ({salonAdicionalFinal}) — automático{cantDias > 1 ? ` (${cantDias} días)` : ""}</td>
-                <td className="text-right py-1">{cantDias}</td>
-                <td className="text-right py-1">$ {fmtMoney(valorSalonAdicionalAplicar)}</td>
-                <td className="text-right py-1">$ {fmtMoney(valorSalonAdicionalAplicar * cantDias)}</td>
-                <td></td>
-              </tr>
-            )}
-            {(ev.vale?.tipos || []).map(t => (
-              <tr key={t.id} style={{ borderBottom: `1px solid ${LINE}`, opacity: 0.85 }}>
-                <td className="py-1">{t.tipo} — automático (del Vale)</td>
-                <td className="text-right py-1">{t.cantidad}</td>
-                <td className="text-right py-1">$ {fmtMoney(Number(t.valorUnitario))}</td>
-                <td className="text-right py-1">$ {fmtMoney((Number(t.cantidad) * Number(t.valorUnitario)))}</td>
+            {totalItemsEvento(evParaTotal, { principal: valorSalonAplicar, adicional: valorSalonAdicionalAplicar }).filas.filter(f => f.auto).map(f => (
+              <tr key={f.id} style={{ borderBottom: `1px solid ${LINE}`, opacity: 0.85 }}>
+                <td className="py-1">{f.detalle} — automático</td>
+                <td className="text-right py-1">{f.cantidad}</td>
+                <td className="text-right py-1">$ {fmtMoney(Number(f.valorUnitario))}</td>
+                <td className="text-right py-1">$ {fmtMoney(Number(f.cantidad) * Number(f.valorUnitario))}</td>
                 <td></td>
               </tr>
             ))}
@@ -404,7 +594,7 @@ export function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
             ))}
             <tr>
               <td className="py-1 font-semibold" colSpan={3}>TOTAL (con IVA incluido)</td>
-              <td className="text-right py-1 font-semibold">$ {fmtMoney(totalItemsEvento(ev, { principal: valorSalonAplicar, adicional: valorSalonAdicionalAplicar }).totalConIva)}</td>
+              <td className="text-right py-1 font-semibold">$ {fmtMoney(totalItemsEvento(evParaTotal, { principal: valorSalonAplicar, adicional: valorSalonAdicionalAplicar }).totalConIva)}</td>
               <td></td>
             </tr>
           </tbody>
@@ -430,7 +620,7 @@ export function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
         </div>
 
         {(() => {
-          const { sinIva, iva, totalConIva } = totalItemsEvento(ev, { principal: valorSalonAplicar, adicional: valorSalonAdicionalAplicar });
+          const { sinIva, iva, totalConIva } = totalItemsEvento(evParaTotal, { principal: valorSalonAplicar, adicional: valorSalonAdicionalAplicar });
           return (
             <div className="p-2.5 rounded mb-3" style={{ background: CARD, border: `1px solid ${LINE}` }}>
               <p style={{ fontFamily: FONT_MONO, fontSize: 12.5, color: INK, marginBottom: 2 }}>Total cargado (precio final, con IVA incluido): $ {fmtMoney(totalConIva)}</p>
@@ -478,7 +668,7 @@ export function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
         </div>
 
         {(ev.estadoPago === "parcial" || ev.estadoPago === "sena") && (() => {
-          const { totalConIva } = totalItemsEvento(ev, { principal: valorSalonAplicar, adicional: valorSalonAdicionalAplicar });
+          const { totalConIva } = totalItemsEvento(evParaTotal, { principal: valorSalonAplicar, adicional: valorSalonAdicionalAplicar });
           return (
             <div className="mt-3 p-3 rounded" style={{ background: PARCIAL_BG, border: `1px solid ${PARCIAL}` }}>
               <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: PARCIAL, marginBottom: 10, fontWeight: 600 }}>
@@ -508,7 +698,19 @@ export function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
           <Field label="Cantidad de salones vendidos"><input type="number" style={inputStyle} value={ev.vale.salonesVendidos} onChange={e => setVale("salonesVendidos", e.target.value)} placeholder="Ej: 1" /></Field>
         </div>
 
-        {(ev.vale.tipos || []).length > 0 && (
+        {multiDia && (
+          <div className="flex gap-1.5 flex-wrap mb-3">
+            {dias.map((d, i) => (
+              <button type="button" key={d.fecha} onClick={() => setDiaActivo(i)}
+                className="text-xs px-2.5 py-1.5 rounded"
+                style={{ fontFamily: FONT_BODY, border: `1px solid ${diaActivo === i ? CP_COLOR : LINE}`, background: diaActivo === i ? CP_COLOR : CARD, color: diaActivo === i ? "#fff" : INK, fontWeight: 600 }}>
+                {fmtFecha(d.fecha).split(" de ")[0]}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {!multiDia && (ev.vale.tipos || []).length > 0 && (
           <div className="flex flex-col gap-2 mb-3">
             {ev.vale.tipos.map(t => (
               <div key={t.id} className="p-2.5 rounded" style={{ background: CARD, border: `1px solid ${LINE}` }}>
@@ -530,18 +732,43 @@ export function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
             </div>
           </div>
         )}
+
+        {multiDia && diaSel && (diaSel.valeTipos || []).length > 0 && (
+          <div className="flex flex-col gap-2 mb-3">
+            <p style={{ fontFamily: FONT_BODY, fontSize: 11.5, color: MUTED }}>Comida de {fmtFecha(diaSel.fecha)}:</p>
+            {diaSel.valeTipos.map(t => (
+              <div key={t.id} className="p-2.5 rounded" style={{ background: CARD, border: `1px solid ${LINE}` }}>
+                <div className="flex items-start justify-between gap-2">
+                  <div style={{ fontFamily: FONT_BODY, fontSize: 13.5, color: INK, fontWeight: 600 }}>{t.tipo}</div>
+                  <button type="button" onClick={() => quitarTipoCubiertoDia(diaActivo, t.id)} style={{ color: PENDIENTE, fontSize: 11, whiteSpace: "nowrap", flexShrink: 0 }}>Quitar</button>
+                </div>
+                <div className="grid grid-cols-2 gap-x-3 gap-y-1 mt-1.5" style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: INK }}>
+                  <div><span style={{ color: MUTED }}>Cantidad: </span>{t.cantidad}</div>
+                  <div><span style={{ color: MUTED }}>Valor uni.: </span>$ {fmtMoney(Number(t.valorUnitario))}</div>
+                  <div className="col-span-2"><span style={{ color: MUTED }}>Valor total: </span>$ {fmtMoney((Number(t.cantidad) * Number(t.valorUnitario)))}</div>
+                  {t.comentario && <div className="col-span-2"><span style={{ color: MUTED }}>Comentario: </span>{t.comentario}</div>}
+                </div>
+              </div>
+            ))}
+            <div className="p-2.5 rounded flex items-center justify-between" style={{ background: HILITE_BG, border: `1px solid ${CP_COLOR}` }}>
+              <span style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK, fontWeight: 700 }}>Cubiertos ese día: {diaSel.valeTipos.reduce((s, t) => s + (Number(t.cantidad) || 0), 0)}</span>
+              <span style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK, fontWeight: 700 }}>$ {fmtMoney(diaSel.valeTipos.reduce((s, t) => s + (Number(t.cantidad) || 0) * (Number(t.valorUnitario) || 0), 0))}</span>
+            </div>
+          </div>
+        )}
+
         <div className="grid grid-cols-4 gap-2 items-end mb-2">
           <Field label="Tipo">
-            <select style={inputStyle} value={nuevoTipoCubierto.tipo} onChange={e => setNuevoTipoCubierto(p => ({ ...p, tipo: e.target.value }))}>
+            <select style={inputStyle} value={(multiDia ? nuevoTipoCubiertoDia : nuevoTipoCubierto).tipo} onChange={e => (multiDia ? setNuevoTipoCubiertoDia : setNuevoTipoCubierto)(p => ({ ...p, tipo: e.target.value }))}>
               {VALE_TIPOS.map(t => <option key={t} value={t}>{t}</option>)}
             </select>
           </Field>
-          <Field label="Cantidad"><input type="number" style={inputStyle} value={nuevoTipoCubierto.cantidad} onChange={e => setNuevoTipoCubierto(p => ({ ...p, cantidad: e.target.value }))} placeholder="Ej: 40" /></Field>
-          <Field label="Valor unitario"><input type="number" style={inputStyle} value={nuevoTipoCubierto.valorUnitario} onChange={e => setNuevoTipoCubierto(p => ({ ...p, valorUnitario: e.target.value }))} placeholder="Ej: 8000" /></Field>
-          <button type="button" onClick={agregarTipoCubierto} className="px-3 py-2 rounded text-sm mb-4" style={{ background: CP_COLOR, color: "#fff" }}>+ Agregar tipo</button>
+          <Field label="Cantidad"><input type="number" style={inputStyle} value={(multiDia ? nuevoTipoCubiertoDia : nuevoTipoCubierto).cantidad} onChange={e => (multiDia ? setNuevoTipoCubiertoDia : setNuevoTipoCubierto)(p => ({ ...p, cantidad: e.target.value }))} placeholder="Ej: 40" /></Field>
+          <Field label="Valor unitario"><input type="number" style={inputStyle} value={(multiDia ? nuevoTipoCubiertoDia : nuevoTipoCubierto).valorUnitario} onChange={e => (multiDia ? setNuevoTipoCubiertoDia : setNuevoTipoCubierto)(p => ({ ...p, valorUnitario: e.target.value }))} placeholder="Ej: 8000" /></Field>
+          <button type="button" onClick={() => multiDia ? agregarTipoCubiertoDia(diaActivo) : agregarTipoCubierto()} className="px-3 py-2 rounded text-sm mb-4" style={{ background: CP_COLOR, color: "#fff" }}>+ Agregar tipo</button>
         </div>
         <Field label="Comentario (opcional — ej: explicar 'Otro', alguna aclaración distinta)">
-          <input style={inputStyle} value={nuevoTipoCubierto.comentario} onChange={e => setNuevoTipoCubierto(p => ({ ...p, comentario: e.target.value }))} placeholder="Ej: menú vegetariano para 5 personas" />
+          <input style={inputStyle} value={(multiDia ? nuevoTipoCubiertoDia : nuevoTipoCubierto).comentario} onChange={e => (multiDia ? setNuevoTipoCubiertoDia : setNuevoTipoCubierto)(p => ({ ...p, comentario: e.target.value }))} placeholder="Ej: menú vegetariano para 5 personas" />
         </Field>
       </div>
 
@@ -552,7 +779,19 @@ export function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
           <Field label="Catering contratado"><input style={inputStyle} value={ev.comanda.caterer || ""} onChange={e => setComanda("caterer", e.target.value)} placeholder="Ej: Catering XYZ, o 'propio del hotel'" /></Field>
         </div>
 
-        {(ev.comanda.items || []).length > 0 && (
+        {multiDia && (
+          <div className="flex gap-1.5 flex-wrap mb-3">
+            {dias.map((d, i) => (
+              <button type="button" key={d.fecha} onClick={() => setDiaActivo(i)}
+                className="text-xs px-2.5 py-1.5 rounded"
+                style={{ fontFamily: FONT_BODY, border: `1px solid ${diaActivo === i ? INK_SOFT : LINE}`, background: diaActivo === i ? INK_SOFT : CARD, color: diaActivo === i ? PAPER : INK, fontWeight: 600 }}>
+                {fmtFecha(d.fecha).split(" de ")[0]}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {!multiDia && (ev.comanda.items || []).length > 0 && (
           <table className="w-full mb-3" style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: INK, borderCollapse: "collapse" }}>
             <thead>
               <tr style={{ borderBottom: `1px solid ${LINE}` }}>
@@ -574,11 +813,35 @@ export function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
             </tbody>
           </table>
         )}
+
+        {multiDia && diaSel && (diaSel.comandaItems || []).length > 0 && (
+          <table className="w-full mb-3" style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: INK, borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ borderBottom: `1px solid ${LINE}` }}>
+                <th className="text-left py-1">Ítem ({fmtFecha(diaSel.fecha)})</th>
+                <th className="text-left py-1">Detalle</th>
+                <th className="text-right py-1">Cant.</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {diaSel.comandaItems.map(it => (
+                <tr key={it.id} style={{ borderBottom: `1px solid ${LINE}` }}>
+                  <td className="py-1">{it.nombre}</td>
+                  <td className="py-1">{it.detalle}</td>
+                  <td className="text-right py-1">{it.cantidad}</td>
+                  <td className="text-right py-1"><button type="button" onClick={() => quitarItemComandaDia(diaActivo, it.id)} style={{ color: PENDIENTE, fontSize: 11 }}>Quitar</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+
         <div className="grid grid-cols-4 gap-2 items-end mb-3">
-          <Field label="Ítem"><input style={inputStyle} value={nuevoItemComanda.nombre} onChange={e => setNuevoItemComanda(p => ({ ...p, nombre: e.target.value }))} placeholder="Ej: Almuerzo" /></Field>
-          <Field label="Detalle (qué cocinar)"><input style={inputStyle} value={nuevoItemComanda.detalle} onChange={e => setNuevoItemComanda(p => ({ ...p, detalle: e.target.value }))} placeholder="Ej: menú 3 pasos, alergias, horario de servicio" /></Field>
-          <Field label="Cantidad"><input type="number" style={inputStyle} value={nuevoItemComanda.cantidad} onChange={e => setNuevoItemComanda(p => ({ ...p, cantidad: e.target.value }))} placeholder="Ej: 80" /></Field>
-          <button type="button" onClick={agregarItemComanda} className="px-3 py-2 rounded text-sm mb-4" style={{ background: INK_SOFT, color: PAPER }}>+ Agregar ítem</button>
+          <Field label="Ítem"><input style={inputStyle} value={(multiDia ? nuevoItemComandaDia : nuevoItemComanda).nombre} onChange={e => (multiDia ? setNuevoItemComandaDia : setNuevoItemComanda)(p => ({ ...p, nombre: e.target.value }))} placeholder="Ej: Almuerzo" /></Field>
+          <Field label="Detalle (qué cocinar)"><input style={inputStyle} value={(multiDia ? nuevoItemComandaDia : nuevoItemComanda).detalle} onChange={e => (multiDia ? setNuevoItemComandaDia : setNuevoItemComanda)(p => ({ ...p, detalle: e.target.value }))} placeholder="Ej: menú 3 pasos, alergias, horario de servicio" /></Field>
+          <Field label="Cantidad"><input type="number" style={inputStyle} value={(multiDia ? nuevoItemComandaDia : nuevoItemComanda).cantidad} onChange={e => (multiDia ? setNuevoItemComandaDia : setNuevoItemComanda)(p => ({ ...p, cantidad: e.target.value }))} placeholder="Ej: 80" /></Field>
+          <button type="button" onClick={() => multiDia ? agregarItemComandaDia(diaActivo) : agregarItemComanda()} className="px-3 py-2 rounded text-sm mb-4" style={{ background: INK_SOFT, color: PAPER }}>+ Agregar ítem</button>
         </div>
         <Field label="Notas generales para cocina (opcional)"><input style={inputStyle} value={ev.comanda.detalle} onChange={e => setComanda("detalle", e.target.value)} placeholder="Ej: horarios de servicio, alergias, aclaraciones" /></Field>
       </div>

@@ -2,7 +2,7 @@ import React, { useMemo, useState } from "react";
 import { ACCENT, CARD, CP_BG, CP_COLOR, FONT_BODY, FONT_HEAD, FONT_MONO, HILITE_BG, INK, INK_SOFT, LINE, MESES, MUTED, PAPER, PARCIAL, PARCIAL_BG, SALONES_FIJOS, VALE_TIPOS } from "../constants.js";
 import { fmtMoney, fmtRangoFecha, fromISO } from "../utils/helpers.js";
 import { totalItemsEvento } from "../utils/eventHelpers.js";
-import { PrintHeader, Stamp, inputStyle } from "./common.jsx";
+import { PrintHeader, Stamp } from "./common.jsx";
 
 export function Stats({ events }) {
   const [year, setYear] = useState(new Date().getFullYear());
@@ -17,29 +17,44 @@ export function Stats({ events }) {
 
   // Cubiertos vendidos y su desglose, discriminados por cada tipo de VALE_TIPOS
   // (coffee break, almuerzo, cena, desayuno, brindis, finger food, otro), salen
-  // del Vale de cada evento, que es el documento pensado para reconciliar contra la factura.
+  // del Vale de cada evento (o, en eventos de varios días, del Vale de cada día
+  // dentro de e.dias), que es el documento pensado para reconciliar contra la factura.
   const { totalCubiertos, porTipo } = useMemo(() => {
     let totalCubiertos = 0;
     const porTipo = {};
     VALE_TIPOS.forEach(t => { porTipo[t] = 0; });
+    const sumarTipo = (t) => {
+      const cant = Number(t.cantidad) || 0;
+      totalCubiertos += cant;
+      if (t.tipo in porTipo) porTipo[t.tipo] += cant;
+      else porTipo["Otro"] += cant;
+    };
     delMes.forEach(e => {
-      (e.vale?.tipos || []).forEach(t => {
-        const cant = Number(t.cantidad) || 0;
-        totalCubiertos += cant;
-        if (t.tipo in porTipo) porTipo[t.tipo] += cant;
-        else porTipo["Otro"] += cant;
-      });
+      if ((e.dias || []).length) {
+        e.dias.forEach(d => (d.valeTipos || []).forEach(sumarTipo));
+      } else {
+        (e.vale?.tipos || []).forEach(sumarTipo);
+      }
     });
     return { totalCubiertos, porTipo };
   }, [delMes]);
 
   // Cantidad de salones vendidos por mes, para cada uno de los 5 salones fijos del hotel.
+  // En eventos de varios días, cada día de e.dias cuenta como una venta de salón aparte
+  // (así un evento de 3 días con 2 días en un salón y 1 en otro se refleja correctamente).
   const salonesVendidos = useMemo(() => {
     const map = {};
     SALONES_FIJOS.forEach(s => { map[s] = 0; });
     delMes.forEach(e => {
-      const s = e.salon;
-      if (s in map) map[s] += Number(e.vale?.salonesVendidos) || 1;
+      if ((e.dias || []).length) {
+        e.dias.forEach(d => {
+          if (d.salon in map) map[d.salon] += 1;
+          if (d.salonAdicionalActivo && d.salonAdicional in map) map[d.salonAdicional] += 1;
+        });
+      } else {
+        const s = e.salon;
+        if (s in map) map[s] += Number(e.vale?.salonesVendidos) || 1;
+      }
     });
     return map;
   }, [delMes]);

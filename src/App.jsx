@@ -12,6 +12,7 @@ import { Voucher, Vale, Comanda } from "./components/Documentos.jsx";
 import { Cronograma } from "./components/Cronograma.jsx";
 import { PlanoEditor } from "./components/ImportPlano.jsx";
 import { Stats, BuscadorEventos } from "./components/StatsBuscadores.jsx";
+import { ListaPresupuestos, PresupuestoForm, PresupuestoDocumento } from "./components/Presupuesto.jsx";
 import { Settings } from "./components/Settings.jsx";
 
 export default function App() {
@@ -28,6 +29,11 @@ export default function App() {
   const [jefeAreas, setJefeAreas] = useState({ telefono: "" });
   const [tarifas, setTarifas] = useState({});
   const [floorplans, setFloorplans] = useState({});
+  // Presupuestos: cotizaciones para mandarle a un cliente que todavía no reservó nada
+  // (independientes de los eventos ya confirmados en el calendario).
+  const [presupuestos, setPresupuestos] = useState([]);
+  const [presupuestoSeleccionado, setPresupuestoSeleccionado] = useState(null);
+  const [presupuestoEditando, setPresupuestoEditando] = useState(null);
   const [view, setView] = useState("calendario");
   const [year, setYear] = useState(new Date().getFullYear());
   const [month, setMonth] = useState(new Date().getMonth());
@@ -82,17 +88,18 @@ export default function App() {
 
   useEffect(() => {
     (async () => {
-      const [ev, jefe, cfg, planos, tar, ocultas] = await Promise.all([
+      const [ev, jefe, cfg, planos, tar, ocultas, presu] = await Promise.all([
         loadShared("eventos", []),
         loadShared("jefeAreas", { telefono: "" }),
         loadShared("config", { pin: null, proximoVale: 1, proximoVoucher: 1, proximoFicha: 1, proximoComanda: 1 }),
         loadShared("planos", {}),
         loadShared("tarifas", {}),
         loadShared("alertasOcultas", []),
+        loadShared("presupuestos", []),
       ]);
       setEvents(ev); setJefeAreas(jefe); setPin(cfg.pin); setProximoVale(cfg.proximoVale || 1);
       setProximoVoucher(cfg.proximoVoucher || 1); setProximoFicha(cfg.proximoFicha || 1); setProximoComanda(cfg.proximoComanda || 1);
-      setFloorplans(planos); setTarifas(tar); setAlertasOcultas(ocultas);
+      setFloorplans(planos); setTarifas(tar); setAlertasOcultas(ocultas); setPresupuestos(presu);
       setReady(true);
     })();
   }, []);
@@ -104,6 +111,7 @@ export default function App() {
   // Las notificaciones que la persona ya descartó (tocando la "×") se guardan acá, para que
   // no vuelvan a aparecer cada vez que se abre la app.
   useEffect(() => { if (ready) saveShared("alertasOcultas", alertasOcultas); }, [alertasOcultas, ready]);
+  useEffect(() => { if (ready) saveShared("presupuestos", presupuestos); }, [presupuestos, ready]);
 
   const setPinIfEmpty = (p) => { setPin(p); saveShared("config", { pin: p, proximoVale, proximoVoucher, proximoFicha, proximoComanda }); };
 
@@ -152,6 +160,20 @@ export default function App() {
     setEvents(prev => prev.filter(e => e.id !== id));
     setSelectedEvent(null); setEditingEvent(null); setView("calendario");
     showToast("Evento eliminado");
+  };
+
+  const handleSavePresupuesto = (p) => {
+    setPresupuestos(prev => {
+      const existe = prev.some(x => x.id === p.id);
+      return existe ? prev.map(x => x.id === p.id ? p : x) : [...prev, p];
+    });
+    setPresupuestoSeleccionado(p); setPresupuestoEditando(null); setView("presupuestoDoc");
+    showToast("Presupuesto guardado ✓");
+  };
+  const handleDeletePresupuesto = (id) => {
+    if (!window.confirm("¿Seguro que querés eliminar este presupuesto? Esta acción no se puede deshacer.")) return;
+    setPresupuestos(prev => prev.filter(p => p.id !== id));
+    showToast("Presupuesto eliminado");
   };
   // Herramienta de Ajustes → Notificaciones: marca de una sola vez todos los eventos que ya
   // pasaron y siguen sin pago total (típicamente eventos viejos importados del calendario que
@@ -204,11 +226,11 @@ export default function App() {
 
       <nav className="no-print px-5 py-3 flex gap-4 flex-wrap" style={{ background: CARD, borderBottom: `1px solid ${LINE}` }}>
         {(isAdmin
-          ? [["calendario", "Mes"], ["semana", "Semana"], ["dia", "Día"], ["buscar", "Buscar"], ["estadisticas", "Estadísticas"], ["ajustes", "Ajustes"]]
+          ? [["calendario", "Mes"], ["semana", "Semana"], ["dia", "Día"], ["buscar", "Buscar"], ["estadisticas", "Estadísticas"], ["presupuesto", "Presupuesto"], ["ajustes", "Ajustes"]]
           : [["calendario", "Mes"], ["semana", "Semana"], ["dia", "Día"], ["buscar", "Buscar"], ["estadisticas", "Estadísticas"]]
         ).map(([key, label]) => (
           <button key={key} onClick={() => setView(key)} className="text-sm font-medium pb-1"
-            style={{ fontFamily: FONT_BODY, color: view === key ? INK : MUTED, borderBottom: view === key ? `2px solid ${ACCENT}` : "2px solid transparent" }}>
+            style={{ fontFamily: FONT_BODY, color: (view === key || (key === "presupuesto" && ["presupuestoForm", "presupuestoDoc"].includes(view))) ? INK : MUTED, borderBottom: (view === key || (key === "presupuesto" && ["presupuestoForm", "presupuestoDoc"].includes(view))) ? `2px solid ${ACCENT}` : "2px solid transparent" }}>
             {label}
           </button>
         ))}
@@ -317,6 +339,32 @@ export default function App() {
         )}
 
         {view === "estadisticas" && <Stats events={events} />}
+
+        {view === "presupuesto" && isAdmin && (
+          <ListaPresupuestos
+            presupuestos={presupuestos}
+            onNuevo={() => { setPresupuestoEditando(null); setView("presupuestoForm"); }}
+            onAbrir={(p) => { setPresupuestoSeleccionado(p); setView("presupuestoDoc"); }}
+            onEditar={(p) => { setPresupuestoEditando(p); setView("presupuestoForm"); }}
+            onEliminar={handleDeletePresupuesto}
+          />
+        )}
+
+        {view === "presupuestoForm" && isAdmin && (
+          <PresupuestoForm
+            initial={presupuestoEditando}
+            onSave={handleSavePresupuesto}
+            onCancel={() => setView(presupuestoEditando ? "presupuestoDoc" : "presupuesto")}
+          />
+        )}
+
+        {view === "presupuestoDoc" && isAdmin && presupuestoSeleccionado && (
+          <PresupuestoDocumento
+            p={presupuestoSeleccionado}
+            onBack={() => setView("presupuesto")}
+            onEdit={() => { setPresupuestoEditando(presupuestoSeleccionado); setView("presupuestoForm"); }}
+          />
+        )}
 
         {view === "buscar" && (
           <BuscadorEventos events={events} onOpenEvent={(e) => { setSelectedEvent(e); setView("ficha"); }} />

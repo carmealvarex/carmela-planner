@@ -56,6 +56,19 @@ export function labelTarifaTipo(tipo) {
 
 export const TIPOS_FACTURA = ["A", "B", "C", "M", "Exenta"];
 export const CONDICIONES_IVA = ["Responsable Inscripto", "Monotributo", "Exento", "Consumidor Final", "No Categorizado"];
+
+// Formas de pago del evento (cómo se cobra/paga, distinto del "estado de pago" que ya
+// existía). Es de selección múltiple porque un mismo evento puede combinar más de una
+// (ej: parte por transferencia, parte cargado a la habitación).
+export const FORMAS_PAGO = [
+  "Efectivo",
+  "Transferencia",
+  "Tarjeta débito",
+  "Tarjeta crédito",
+  "Cargar tarifa a la habitación",
+  "Abrir sala con seña $",
+  "Paga huésped en destino",
+];
 // El N° de vale ahora es siempre automático y correlativo (no se carga a mano).
 export function formatValeNumero(n) { return String(n).padStart(4, "0"); }
 

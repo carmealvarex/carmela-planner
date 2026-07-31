@@ -1,5 +1,41 @@
 import { fechasEvento, toISO, uid } from "./helpers.js";
 
+// Un "día" dentro de un evento de varios días: tiene su propio salón, su propia tarifa
+// (completa / media / cortesía) y su propia comida (vale + comanda), independiente de los
+// demás días del mismo evento. Se usa SOLO cuando el evento dura más de un día
+// (ver esMultiDia en helpers.js); los eventos de un solo día siguen usando los campos
+// "planos" de siempre (ev.salon, ev.tarifaTipo, ev.vale, ev.comanda) sin tocar nada.
+export function blankDia(fecha, base) {
+  return {
+    fecha,
+    salon: base?.salon || "", salonOtro: base?.salonOtro || "",
+    tarifaTipo: base?.tarifaTipo || "completa",
+    tarifaEspecialActiva: false, tarifaEspecial: "",
+    valorSalon: "", // snapshot histórico del valor de salón aplicado ese día en particular
+    salonAdicionalActivo: base?.salonAdicionalActivo || false, salonAdicional: base?.salonAdicional || "", salonAdicionalOtro: base?.salonAdicionalOtro || "",
+    tarifaTipoAdicional: base?.tarifaTipoAdicional || "completa",
+    tarifaEspecialActivaAdicional: false, tarifaEspecialAdicional: "",
+    valorSalonAdicional: "",
+    // Comida de ESE día en particular (equivalente a vale.tipos, pero por día).
+    valeTipos: [],
+    // Ítems de cocina de ESE día en particular (equivalente a comanda.items, pero por día).
+    comandaItems: [],
+  };
+}
+
+// Mantiene ev.dias sincronizado con el rango de fechas del evento (fecha → fechaFin):
+// agrega días nuevos (clonando salón/tarifa del último día existente, para no tener que
+// cargarlo de cero) y quita los que ya no correspondan si se acorta el rango.
+// No hace nada si el evento es de un solo día.
+export function sincronizarDias(ev) {
+  const fechas = fechasEvento(ev);
+  if (fechas.length < 2) return ev.dias || [];
+  const actuales = ev.dias || [];
+  const porFecha = Object.fromEntries(actuales.map(d => [d.fecha, d]));
+  const ultimo = actuales[actuales.length - 1];
+  return fechas.map(f => porFecha[f] || blankDia(f, ultimo || ev));
+}
+
 export function blankEvent(fecha) {
   return {
     id: uid(), fecha: fecha || toISO(new Date()), fechaFin: "", salon: "", salonOtro: "",
@@ -39,6 +75,9 @@ export function blankEvent(fecha) {
     // Comanda: documento de Cocina. Detalle de invitados/horario/salón/cronograma
     // + qué hay que cocinar (ítems con su detalle) + catering contratado.
     comanda: { cubiertos: "", detalle: "", caterer: "", items: [] },
+    // Desglose por día, solo para eventos de varios días (ver blankDia/sincronizarDias arriba).
+    // Vacío en eventos de un solo día: en ese caso se usan los campos planos de siempre.
+    dias: [],
     cronograma: [],
     planoDibujo: "",
     notificarJefeAreas: false,
@@ -63,6 +102,32 @@ export function blankEvent(fecha) {
 export function totalItemsEvento(ev, overrideSalon) {
   const items = ev.itemsPresupuesto || [];
   const dias = fechasEvento(ev).length;
+
+  // Evento de varios días con desglose cargado día por día: cada día suma su propio salón
+  // (con su propia tarifa/cortesía), su salón adicional si tiene, y su propia comida (vale).
+  // No se usa overrideSalon acá (eso es solo para previsualizar mientras se edita un evento
+  // de un solo día): en modo por-día cada fila ya trae su valor congelado.
+  if (dias > 1 && (ev.dias || []).length) {
+    const filasDias = ev.dias.flatMap(d => {
+      const filas = [];
+      if (d.salon) {
+        filas.push({ id: `auto-salon-${d.fecha}`, detalle: `Salón (${d.salon}) — ${fmtFechaCortaSeguro(d.fecha)}`, cantidad: 1, valorUnitario: Number(d.valorSalon) || 0, auto: true });
+      }
+      if (d.salonAdicionalActivo && d.salonAdicional) {
+        filas.push({ id: `auto-salon-adic-${d.fecha}`, detalle: `Salón adicional (${d.salonAdicional}) — ${fmtFechaCortaSeguro(d.fecha)}`, cantidad: 1, valorUnitario: Number(d.valorSalonAdicional) || 0, auto: true });
+      }
+      (d.valeTipos || []).forEach(t => {
+        filas.push({ id: `auto-vale-${d.fecha}-${t.id}`, detalle: `${t.tipo} — ${fmtFechaCortaSeguro(d.fecha)}`, cantidad: Number(t.cantidad) || 0, valorUnitario: Number(t.valorUnitario) || 0, auto: true });
+      });
+      return filas;
+    });
+    const filas = [...filasDias, ...items];
+    const totalConIva = filas.reduce((s, i) => s + (Number(i.cantidad) || 0) * (Number(i.valorUnitario) || 0), 0);
+    const sinIva = totalConIva / 1.21;
+    const iva = totalConIva - sinIva;
+    return { filas, sinIva, iva, totalConIva };
+  }
+
   const overridePrincipal = overrideSalon != null && typeof overrideSalon === "object" ? overrideSalon.principal : overrideSalon;
   const overrideAdicional = overrideSalon != null && typeof overrideSalon === "object" ? overrideSalon.adicional : undefined;
   const valorSalon = overridePrincipal != null ? (Number(overridePrincipal) || 0) : (Number(ev.valorSalon) || 0);
@@ -84,4 +149,12 @@ export function totalItemsEvento(ev, overrideSalon) {
   const sinIva = totalConIva / 1.21;
   const iva = totalConIva - sinIva;
   return { filas, sinIva, iva, totalConIva };
+}
+
+// Formato corto de fecha para las filas automáticas de la cotización (evita import circular
+// con helpers.js para fmtFechaCorta, así que se resuelve acá mismo con la misma lógica).
+function fmtFechaCortaSeguro(iso) {
+  if (!iso) return "";
+  const [y, m, d] = iso.split("-");
+  return `${d}/${m}`;
 }

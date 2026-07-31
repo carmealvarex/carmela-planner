@@ -310,7 +310,7 @@ export function Comanda({ ev, onBack }) {
         <button onClick={onBack} className="px-4 py-2 rounded text-sm font-medium" style={{ border: `1px solid ${LINE}`, color: INK, fontFamily: FONT_BODY }}>Volver</button>
       </div>
       <div ref={comandaRef} className="p-8" style={{ background: CARD, border: `1px solid ${INK}`, maxWidth: 640, margin: "0 auto" }}>
-        <PrintHeader eyebrow="Comanda de cocina" titulo={ev.salon || "Salón"} />
+        <PrintHeader eyebrow="Comanda de cocina" titulo={`${ev.nombreEvento || "Evento sin nombre"} ${fmtFechaCorta(ev.fecha)}`} />
         <div className="grid grid-cols-2 gap-y-2 gap-x-6 mb-4" style={{ fontFamily: FONT_BODY, fontSize: 13.5, color: INK }}>
           <p><b>Fecha:</b> {fmtRangoFecha(ev)}</p>
           <p><b>Horario:</b> {ev.horaInicio} a {ev.horaFin}</p>
@@ -320,8 +320,8 @@ export function Comanda({ ev, onBack }) {
           <p><b>Catering contratado:</b> {c.caterer || "-"}</p>
         </div>
 
-        <div className="p-4 mb-4 rounded" style={{ background: PAGADO_BG, border: `1px solid ${PAGADO}` }}>
-          <p style={{ fontFamily: FONT_HEAD, fontSize: 22, color: PAGADO }}>{c.cubiertos || "-"} cubiertos a preparar</p>
+        <div className="inline-block px-3 py-1.5 mb-4 rounded" style={{ background: PAGADO_BG, border: `1px solid ${PAGADO}` }}>
+          <p style={{ fontFamily: FONT_HEAD, fontSize: 14, color: PAGADO }}>{c.cubiertos || "-"} cubiertos a preparar</p>
         </div>
 
         {itemsComanda.length > 0 && (
@@ -350,7 +350,6 @@ export function Comanda({ ev, onBack }) {
         )}
 
         {c.detalle && <p style={{ fontFamily: FONT_BODY, fontSize: 13.5, color: INK, marginBottom: 10 }}><b>Notas para cocina:</b> {c.detalle}</p>}
-        <p style={{ fontFamily: FONT_BODY, fontSize: 12, color: MUTED }}>Esta comanda alimenta la estadística mensual de cubiertos para el cálculo del proporcional/premio del hotel.</p>
         <p className="mt-8" style={{ fontFamily: FONT_MONO, fontSize: 10.5, color: MUTED }}>Generado el {new Date().toLocaleDateString("es-AR")}</p>
       </div>
     </div>

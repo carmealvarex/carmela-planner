@@ -62,6 +62,7 @@ export function blankEvent(fecha) {
     esHuesped: false,
     huespedes: [],
     estadoPago: "pendiente", adelanto: "", comprobanteTexto: "", comprobanteLink: "",
+    formasPago: [], numeroHabitacion: "", montoAperturaSala: "",
     retenciones: "no", // legado, se migra a `facturas` al abrir la ficha
     facturas: [],
     itemsPresupuesto: [],

@@ -139,6 +139,12 @@ export function Voucher({ ev, onBack }) {
           <div style={{ height: 1, background: PARCIAL, opacity: 0.3, margin: "8px 0" }} />
           <p><b>Pagado:</b> $ {fmtMoney(pagado)}</p>
           <p><b>Saldo pendiente:</b> $ {fmtMoney(saldo)}</p>
+          {(ev.formasPago || []).length > 0 && (
+            <p className="mt-1"><b>Forma de pago:</b> {ev.formasPago.join(", ")}
+              {ev.numeroHabitacion ? ` · Habitación N° ${ev.numeroHabitacion}` : ""}
+              {ev.montoAperturaSala ? ` · Sala abierta con $ ${fmtMoney(Number(ev.montoAperturaSala))}` : ""}
+            </p>
+          )}
         </div>
 
         <p style={{ fontFamily: FONT_BODY, fontSize: 11, color: MUTED }}>Este comprobante confirma la reserva de la fecha con todo lo contratado. Ante cualquier consulta, comunicate con el hotel citando el nombre del evento y la fecha.</p>
@@ -320,27 +326,17 @@ export function Comanda({ ev, onBack }) {
 
         {itemsComanda.length > 0 && (
           <div className="mb-4">
-            <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: INK, marginBottom: 6, fontWeight: 600 }}>Qué cocinar</p>
-            <table className="w-full" style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK, borderCollapse: "collapse", border: `1px solid ${INK}` }}>
-              <thead>
-                <tr style={{ background: HILITE_BG }}>
-                  {multiDiaComanda && <th className="text-left p-2" style={{ border: `1px solid ${LINE}` }}>Día</th>}
-                  <th className="text-left p-2" style={{ border: `1px solid ${LINE}` }}>Ítem</th>
-                  <th className="text-left p-2" style={{ border: `1px solid ${LINE}` }}>Detalle</th>
-                  <th className="text-right p-2" style={{ border: `1px solid ${LINE}` }}>Cant.</th>
-                </tr>
-              </thead>
-              <tbody>
-                {itemsComanda.map(it => (
-                  <tr key={`${it.fecha || ""}-${it.id}`}>
-                    {multiDiaComanda && <td className="p-2" style={{ border: `1px solid ${LINE}` }}>{it.fecha}</td>}
-                    <td className="p-2" style={{ border: `1px solid ${LINE}` }}>{it.nombre}</td>
-                    <td className="p-2" style={{ border: `1px solid ${LINE}` }}>{it.detalle}</td>
-                    <td className="text-right p-2" style={{ border: `1px solid ${LINE}` }}>{it.cantidad}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: INK, marginBottom: 8, fontWeight: 600 }}>Qué cocinar</p>
+            <div className="flex flex-col gap-3">
+              {itemsComanda.map(it => (
+                <div key={`${it.fecha || ""}-${it.id}`} className="p-3" style={{ border: `1px solid ${LINE}`, borderLeft: `4px solid ${INK}` }}>
+                  <p style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 2 }}>
+                    {it.nombre}{it.cantidad ? ` — ${it.cantidad} cubiertos` : ""}{multiDiaComanda && it.fecha ? ` (${it.fecha})` : ""}
+                  </p>
+                  {it.detalle && <p style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK, whiteSpace: "pre-wrap" }}>{it.detalle}</p>}
+                </div>
+              ))}
+            </div>
           </div>
         )}
 

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { ACCENT, CARD, CATERING_SUGERIDOS, COLORES_EVENTO, CONDICIONES_IVA, CP_BG, CP_COLOR, ESTADOS_PAGO, FONT_BODY, FONT_HEAD, FONT_MONO, FRANJAS_HORARIAS, HILITE_BG, INK, INK_SOFT, LINE, MUTED, PAPER, PARCIAL, PARCIAL_BG, PENDIENTE, SALONES_FIJOS, TARIFA_TIPOS, TECNICA_SUGERIDOS, TIPOS_FACTURA, VALE_TIPOS } from "../constants.js";
+import { ACCENT, CARD, CATERING_SUGERIDOS, COLORES_EVENTO, CONDICIONES_IVA, CP_BG, CP_COLOR, ESTADOS_PAGO, FONT_BODY, FONT_HEAD, FONT_MONO, FORMAS_PAGO, FRANJAS_HORARIAS, HILITE_BG, INK, INK_SOFT, LINE, MUTED, PAPER, PARCIAL, PARCIAL_BG, PENDIENTE, SALONES_FIJOS, TARIFA_TIPOS, TECNICA_SUGERIDOS, TIPOS_FACTURA, VALE_TIPOS } from "../constants.js";
 import { esMultiDia, fechasEvento, fmtFecha, fmtMoney, fmtRangoFecha, uid } from "../utils/helpers.js";
 import { blankDia, blankEvent, sincronizarDias, totalItemsEvento } from "../utils/eventHelpers.js";
 import { Field, HoraField, Toggle, inputStyle } from "./common.jsx";
@@ -157,6 +157,7 @@ export function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
   const [nuevoIncluye, setNuevoIncluye] = useState("");
   const toggleTecnica = (item) => setEv(prev => ({ ...prev, tecnica: (prev.tecnica || []).includes(item) ? prev.tecnica.filter(i => i !== item) : [...(prev.tecnica || []), item] }));
   const [nuevaTecnica, setNuevaTecnica] = useState("");
+  const toggleFormaPago = (item) => setEv(prev => ({ ...prev, formasPago: (prev.formasPago || []).includes(item) ? prev.formasPago.filter(i => i !== item) : [...(prev.formasPago || []), item] }));
 
   const [nuevaHora, setNuevaHora] = useState("");
   const [nuevoDetalle, setNuevoDetalle] = useState("");
@@ -609,6 +610,25 @@ export function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
       </div>
 
       <div className="p-3 rounded mb-4" style={{ background: HILITE_BG, border: `1px solid ${LINE}` }}>
+        <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: MUTED, marginBottom: 10 }}>Forma de pago (podés marcar más de una)</p>
+        <div className="flex flex-wrap gap-2 mb-2">
+          {FORMAS_PAGO.map(item => (
+            <button type="button" key={item} onClick={() => toggleFormaPago(item)}
+              className="text-xs px-2.5 py-1 rounded-full"
+              style={{ border: `1px solid ${(ev.formasPago || []).includes(item) ? ACCENT : LINE}`, background: (ev.formasPago || []).includes(item) ? ACCENT : "transparent", color: (ev.formasPago || []).includes(item) ? "#fff" : INK, fontFamily: FONT_BODY }}>
+              {item}
+            </button>
+          ))}
+        </div>
+        {(ev.formasPago || []).includes("Cargar tarifa a la habitación") && (
+          <Field label="N° de habitación"><input style={inputStyle} value={ev.numeroHabitacion || ""} onChange={e => set("numeroHabitacion", e.target.value)} placeholder="Ej: 214" /></Field>
+        )}
+        {(ev.formasPago || []).includes("Abrir sala con seña $") && (
+          <Field label="Monto de apertura de sala $"><input type="number" style={inputStyle} value={ev.montoAperturaSala || ""} onChange={e => set("montoAperturaSala", e.target.value)} placeholder="Ej: 100000" /></Field>
+        )}
+      </div>
+
+      <div className="p-3 rounded mb-4" style={{ background: HILITE_BG, border: `1px solid ${LINE}` }}>
         <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: MUTED, marginBottom: 10 }}>Estado de pago</p>
         <div className="flex gap-4 mb-3 flex-wrap">
           {ESTADOS_PAGO.map(([v, l]) => (
@@ -792,57 +812,45 @@ export function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
         )}
 
         {!multiDia && (ev.comanda.items || []).length > 0 && (
-          <table className="w-full mb-3" style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: INK, borderCollapse: "collapse" }}>
-            <thead>
-              <tr style={{ borderBottom: `1px solid ${LINE}` }}>
-                <th className="text-left py-1">Ítem</th>
-                <th className="text-left py-1">Detalle</th>
-                <th className="text-right py-1">Cant.</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {ev.comanda.items.map(it => (
-                <tr key={it.id} style={{ borderBottom: `1px solid ${LINE}` }}>
-                  <td className="py-1">{it.nombre}</td>
-                  <td className="py-1">{it.detalle}</td>
-                  <td className="text-right py-1">{it.cantidad}</td>
-                  <td className="text-right py-1"><button type="button" onClick={() => quitarItemComanda(it.id)} style={{ color: PENDIENTE, fontSize: 11 }}>Quitar</button></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="flex flex-col gap-2 mb-3">
+            {ev.comanda.items.map(it => (
+              <div key={it.id} className="p-2.5 rounded" style={{ background: CARD, border: `1px solid ${LINE}` }}>
+                <div className="flex items-start justify-between gap-2">
+                  <div style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>{it.nombre}{it.cantidad ? ` (${it.cantidad})` : ""}</div>
+                  <button type="button" onClick={() => quitarItemComanda(it.id)} style={{ color: PENDIENTE, fontSize: 11, whiteSpace: "nowrap", flexShrink: 0 }}>Quitar</button>
+                </div>
+                {it.detalle && <p style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: INK, whiteSpace: "pre-wrap", marginTop: 4 }}>{it.detalle}</p>}
+              </div>
+            ))}
+          </div>
         )}
 
         {multiDia && diaSel && (diaSel.comandaItems || []).length > 0 && (
-          <table className="w-full mb-3" style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: INK, borderCollapse: "collapse" }}>
-            <thead>
-              <tr style={{ borderBottom: `1px solid ${LINE}` }}>
-                <th className="text-left py-1">Ítem ({fmtFecha(diaSel.fecha)})</th>
-                <th className="text-left py-1">Detalle</th>
-                <th className="text-right py-1">Cant.</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {diaSel.comandaItems.map(it => (
-                <tr key={it.id} style={{ borderBottom: `1px solid ${LINE}` }}>
-                  <td className="py-1">{it.nombre}</td>
-                  <td className="py-1">{it.detalle}</td>
-                  <td className="text-right py-1">{it.cantidad}</td>
-                  <td className="text-right py-1"><button type="button" onClick={() => quitarItemComandaDia(diaActivo, it.id)} style={{ color: PENDIENTE, fontSize: 11 }}>Quitar</button></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="flex flex-col gap-2 mb-3">
+            <p style={{ fontFamily: FONT_BODY, fontSize: 11.5, color: MUTED }}>Comanda de {fmtFecha(diaSel.fecha)}:</p>
+            {diaSel.comandaItems.map(it => (
+              <div key={it.id} className="p-2.5 rounded" style={{ background: CARD, border: `1px solid ${LINE}` }}>
+                <div className="flex items-start justify-between gap-2">
+                  <div style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>{it.nombre}{it.cantidad ? ` (${it.cantidad})` : ""}</div>
+                  <button type="button" onClick={() => quitarItemComandaDia(diaActivo, it.id)} style={{ color: PENDIENTE, fontSize: 11, whiteSpace: "nowrap", flexShrink: 0 }}>Quitar</button>
+                </div>
+                {it.detalle && <p style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: INK, whiteSpace: "pre-wrap", marginTop: 4 }}>{it.detalle}</p>}
+              </div>
+            ))}
+          </div>
         )}
 
-        <div className="grid grid-cols-4 gap-2 items-end mb-3">
-          <Field label="Ítem"><input style={inputStyle} value={(multiDia ? nuevoItemComandaDia : nuevoItemComanda).nombre} onChange={e => (multiDia ? setNuevoItemComandaDia : setNuevoItemComanda)(p => ({ ...p, nombre: e.target.value }))} placeholder="Ej: Almuerzo" /></Field>
-          <Field label="Detalle (qué cocinar)"><input style={inputStyle} value={(multiDia ? nuevoItemComandaDia : nuevoItemComanda).detalle} onChange={e => (multiDia ? setNuevoItemComandaDia : setNuevoItemComanda)(p => ({ ...p, detalle: e.target.value }))} placeholder="Ej: menú 3 pasos, alergias, horario de servicio" /></Field>
+        <div className="grid grid-cols-3 gap-2 items-end mb-2">
+          <Field label="Ítem / sección"><input style={inputStyle} value={(multiDia ? nuevoItemComandaDia : nuevoItemComanda).nombre} onChange={e => (multiDia ? setNuevoItemComandaDia : setNuevoItemComanda)(p => ({ ...p, nombre: e.target.value }))} placeholder="Ej: Entrada, Plato principal, Postre, Bebida" /></Field>
           <Field label="Cantidad"><input type="number" style={inputStyle} value={(multiDia ? nuevoItemComandaDia : nuevoItemComanda).cantidad} onChange={e => (multiDia ? setNuevoItemComandaDia : setNuevoItemComanda)(p => ({ ...p, cantidad: e.target.value }))} placeholder="Ej: 80" /></Field>
           <button type="button" onClick={() => multiDia ? agregarItemComandaDia(diaActivo) : agregarItemComanda()} className="px-3 py-2 rounded text-sm mb-4" style={{ background: INK_SOFT, color: PAPER }}>+ Agregar ítem</button>
         </div>
+        <Field label="Detalle (qué cocinar — usá Enter para separar opciones/renglones)">
+          <textarea rows={4} style={{ ...inputStyle, resize: "vertical", fontFamily: FONT_BODY }}
+            value={(multiDia ? nuevoItemComandaDia : nuevoItemComanda).detalle}
+            onChange={e => (multiDia ? setNuevoItemComandaDia : setNuevoItemComanda)(p => ({ ...p, detalle: e.target.value }))}
+            placeholder={"Ej:\n- Mollejas a la mostaza con chips de papa\n- Croquetas de salmón con salsa romesco\nAlergias: 2 celíacos"} />
+        </Field>
         <Field label="Notas generales para cocina (opcional)"><input style={inputStyle} value={ev.comanda.detalle} onChange={e => setComanda("detalle", e.target.value)} placeholder="Ej: horarios de servicio, alergias, aclaraciones" /></Field>
       </div>
 

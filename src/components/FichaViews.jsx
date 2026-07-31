@@ -167,24 +167,28 @@ export function FichaCompleta({ ev, jefeAreas, isAdmin, onEdit, onVaucher, onCro
           <div className="p-3 rounded mb-4" style={{ background: HILITE_BG, border: `1px solid ${LINE}` }}>
             <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: MUTED, marginBottom: 10, fontWeight: 600 }}>Cotización del evento — valor total</p>
             {filas.length > 0 ? (
-              <table className="w-full mb-2" style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: INK, borderCollapse: "collapse" }}>
+              <table className="w-full mb-2" style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: INK, borderCollapse: "collapse", border: `1px solid ${INK}` }}>
                 <thead>
-                  <tr style={{ borderBottom: `1px solid ${LINE}` }}>
-                    <th className="text-left py-1">Detalle</th>
-                    <th className="text-right py-1">Cant.</th>
-                    <th className="text-right py-1">Valor uni.</th>
-                    <th className="text-right py-1">Valor total</th>
+                  <tr style={{ background: CARD }}>
+                    <th className="text-left p-2" style={{ border: `1px solid ${LINE}` }}>Detalle</th>
+                    <th className="text-center p-2" style={{ border: `1px solid ${LINE}` }}>Cant.</th>
+                    <th className="text-right p-2" style={{ border: `1px solid ${LINE}` }}>Valor uni.</th>
+                    <th className="text-right p-2" style={{ border: `1px solid ${LINE}` }}>Valor total</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filas.map(f => (
-                    <tr key={f.id} style={{ borderBottom: `1px solid ${LINE}`, opacity: f.auto ? 0.85 : 1 }}>
-                      <td className="py-1">{f.detalle}{f.auto ? " — automático" : ""}</td>
-                      <td className="text-right py-1">{f.cantidad}</td>
-                      <td className="text-right py-1">$ {fmtMoney(Number(f.valorUnitario))}</td>
-                      <td className="text-right py-1">$ {fmtMoney((Number(f.cantidad) * Number(f.valorUnitario)))}</td>
+                    <tr key={f.id} style={{ opacity: f.auto ? 0.85 : 1 }}>
+                      <td className="p-2" style={{ border: `1px solid ${LINE}` }}>{f.detalle}{f.auto ? " — automático" : ""}</td>
+                      <td className="text-center p-2" style={{ border: `1px solid ${LINE}` }}>{f.cantidad}</td>
+                      <td className="text-right p-2" style={{ border: `1px solid ${LINE}` }}>$ {fmtMoney(Number(f.valorUnitario))}</td>
+                      <td className="text-right p-2" style={{ border: `1px solid ${LINE}` }}>$ {fmtMoney((Number(f.cantidad) * Number(f.valorUnitario)))}</td>
                     </tr>
                   ))}
+                  <tr style={{ background: CARD, fontWeight: 700 }}>
+                    <td className="p-2" colSpan={3} style={{ border: `1px solid ${LINE}` }}>TOTAL (con IVA incluido)</td>
+                    <td className="text-right p-2" style={{ border: `1px solid ${LINE}` }}>$ {fmtMoney(totalConIva)}</td>
+                  </tr>
                 </tbody>
               </table>
             ) : (
@@ -209,6 +213,13 @@ export function FichaCompleta({ ev, jefeAreas, isAdmin, onEdit, onVaucher, onCro
           </p>
         );
       })()}
+      {(ev.formasPago || []).length > 0 && (
+        <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}>
+          <b>Forma de pago:</b> {ev.formasPago.join(", ")}
+          {ev.numeroHabitacion ? ` · Habitación N° ${ev.numeroHabitacion}` : ""}
+          {ev.montoAperturaSala ? ` · Sala abierta con $ ${fmtMoney(Number(ev.montoAperturaSala))}` : ""}
+        </p>
+      )}
 
       {/* ---- Vale (Administración): salones y cubiertos vendidos, discriminados por tipo ---- */}
       <div className="p-3 rounded mb-4" style={{ background: CP_BG, border: `1px solid ${CP_COLOR}` }}>
@@ -244,26 +255,16 @@ export function FichaCompleta({ ev, jefeAreas, isAdmin, onEdit, onVaucher, onCro
           <b>Cubiertos a preparar:</b> {ev.comanda?.cubiertos || "-"} {ev.comanda?.caterer ? <>· <b>Catering:</b> {ev.comanda.caterer}</> : ""}
         </p>
         {itemsComandaFicha.length > 0 ? (
-          <table className="w-full mb-2" style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: INK, borderCollapse: "collapse" }}>
-            <thead>
-              <tr style={{ borderBottom: `1px solid ${LINE}` }}>
-                {multiDiaFicha && <th className="text-left py-1">Día</th>}
-                <th className="text-left py-1">Ítem</th>
-                <th className="text-left py-1">Detalle</th>
-                <th className="text-right py-1">Cant.</th>
-              </tr>
-            </thead>
-            <tbody>
-              {itemsComandaFicha.map(it => (
-                <tr key={`${it.fecha || ""}-${it.id}`} style={{ borderBottom: `1px solid ${LINE}` }}>
-                  {multiDiaFicha && <td className="py-1">{it.fecha}</td>}
-                  <td className="py-1">{it.nombre}</td>
-                  <td className="py-1">{it.detalle}</td>
-                  <td className="text-right py-1">{it.cantidad}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="flex flex-col gap-2 mb-2">
+            {itemsComandaFicha.map(it => (
+              <div key={`${it.fecha || ""}-${it.id}`} className="p-2.5 rounded" style={{ background: CARD, border: `1px solid ${LINE}`, borderLeft: `3px solid ${INK}` }}>
+                <p style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: INK, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                  {it.nombre}{it.cantidad ? ` (${it.cantidad})` : ""}{multiDiaFicha && it.fecha ? ` — ${it.fecha}` : ""}
+                </p>
+                {it.detalle && <p style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: INK, whiteSpace: "pre-wrap", marginTop: 2 }}>{it.detalle}</p>}
+              </div>
+            ))}
+          </div>
         ) : <p style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: MUTED }}>Sin ítems de comanda cargados.</p>}
         <p style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK }}><b>Notas para cocina:</b> {ev.comanda?.detalle || "-"}</p>
       </div>

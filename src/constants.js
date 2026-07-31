@@ -41,6 +41,19 @@ export const SALONES_FIJOS = ["Salón Argos", "Sala España", "Sala 1", "Sala 2"
 
 export const VALE_TIPOS = ["Coffee break", "Almuerzo", "Cena", "Desayuno", "Brindis", "Finger food", "Otro"];
 
+// Tipos de tarifa que se le puede asignar a un salón, ya sea al evento completo (eventos de
+// un solo día) o a cada día individual (eventos de varios días, ver `dias` en eventHelpers.js).
+// "Cortesía" es un día que se regala sin cargo: el valor del salón queda en $0 sin ir a buscar
+// el tarifario de Ajustes.
+export const TARIFA_TIPOS = [
+  { value: "completa", label: "Tarifa completa" },
+  { value: "media", label: "Media tarifa" },
+  { value: "cortesia", label: "Cortesía (sin cargo)" },
+];
+export function labelTarifaTipo(tipo) {
+  return TARIFA_TIPOS.find(t => t.value === tipo)?.label || "Tarifa completa";
+}
+
 export const TIPOS_FACTURA = ["A", "B", "C", "M", "Exenta"];
 export const CONDICIONES_IVA = ["Responsable Inscripto", "Monotributo", "Exento", "Consumidor Final", "No Categorizado"];
 // El N° de vale ahora es siempre automático y correlativo (no se carga a mano).

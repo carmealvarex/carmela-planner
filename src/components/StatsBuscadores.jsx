@@ -2,7 +2,7 @@ import React, { useMemo, useState } from "react";
 import { ACCENT, CARD, CP_BG, CP_COLOR, FONT_BODY, FONT_HEAD, FONT_MONO, HILITE_BG, INK, INK_SOFT, LINE, MESES, MUTED, PAPER, PARCIAL, PARCIAL_BG, SALONES_FIJOS, VALE_TIPOS } from "../constants.js";
 import { fmtMoney, fmtRangoFecha, fromISO } from "../utils/helpers.js";
 import { totalItemsEvento } from "../utils/eventHelpers.js";
-import { PrintHeader, Stamp } from "./common.jsx";
+import { PrintHeader, Stamp, inputStyle } from "./common.jsx";
 
 export function Stats({ events }) {
   const [year, setYear] = useState(new Date().getFullYear());

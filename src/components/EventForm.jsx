@@ -308,6 +308,15 @@ export function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
               </select>
               {diaSel.salon === "Otro" && <input style={{ ...inputStyle, marginBottom: 8 }} placeholder="Nombre del salón" value={diaSel.salonOtro} onChange={e => setDia(diaActivo, "salonOtro", e.target.value)} />}
 
+              <div className="grid grid-cols-2 gap-2 mb-2">
+                <Field label="Hora inicio">
+                  <input type="time" style={inputStyle} value={diaSel.horaInicio || ""} onChange={e => setDia(diaActivo, "horaInicio", e.target.value)} />
+                </Field>
+                <Field label="Hora fin">
+                  <input type="time" style={inputStyle} value={diaSel.horaFin || ""} onChange={e => setDia(diaActivo, "horaFin", e.target.value)} />
+                </Field>
+              </div>
+
               <div className="flex gap-3 items-center flex-wrap mb-2">
                 {TARIFA_TIPOS.map(t => (
                   <label key={t.value} className="flex items-center gap-1.5">

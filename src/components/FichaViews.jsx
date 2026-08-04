@@ -78,7 +78,7 @@ export function FichaCompleta({ ev, jefeAreas, isAdmin, onEdit, onVaucher, onCro
               const cubiertosDia = (d.valeTipos || []).reduce((s, t) => s + (Number(t.cantidad) || 0), 0);
               return (
                 <div key={d.fecha} className="p-2.5 rounded" style={{ background: CARD, border: `1px solid ${LINE}` }}>
-                  <p style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK, fontWeight: 700, marginBottom: 3 }}>{d.fecha}</p>
+                  <p style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK, fontWeight: 700, marginBottom: 3 }}>{d.fecha}{(d.horaInicio || d.horaFin) ? ` · ${d.horaInicio || "?"}–${d.horaFin || "?"}` : ""}</p>
                   <p style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: INK, marginBottom: 2 }}>
                     <b>Salón:</b> {d.salon || "-"} · <b>Tarifa:</b> {labelTarifaTipo(d.tarifaTipo)}{d.tarifaEspecialActiva ? " (especial)" : ""}
                     {d.salonAdicionalActivo && d.salonAdicional ? ` · + ${d.salonAdicional} (${labelTarifaTipo(d.tarifaTipoAdicional)}${d.tarifaEspecialActivaAdicional ? ", especial" : ""})` : ""}

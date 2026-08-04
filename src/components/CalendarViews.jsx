@@ -85,6 +85,7 @@ export function WeekView({ weekStart, setWeekStart, events, isAdmin, onOpenEvent
           <button key={e.id} onClick={() => onOpenEvent(e)} className="text-left p-3 rounded flex items-center justify-between" style={{ background: CARD, border: `1px solid ${LINE}` }}>
             <div>
               <div style={{ fontFamily: FONT_BODY, fontWeight: 600, color: INK, fontSize: 14 }}>{fmtRangoFecha(e)} — {e.salon || "Sin salón"}</div>
+              {e.nombreEvento && <div style={{ fontFamily: FONT_BODY, fontWeight: 600, color: ACCENT, fontSize: 13 }}>{e.nombreEvento}</div>}
               <div style={{ fontFamily: FONT_BODY, fontSize: 12, color: MUTED }}>{e.horaInicio}–{e.horaFin} · {e.personas || "?"} personas</div>
             </div>
             <Stamp estadoPago={e.estadoPago} />

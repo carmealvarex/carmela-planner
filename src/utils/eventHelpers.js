@@ -9,6 +9,7 @@ export function blankDia(fecha, base) {
   return {
     fecha,
     salon: base?.salon || "", salonOtro: base?.salonOtro || "",
+    horaInicio: base?.horaInicio || "09:00", horaFin: base?.horaFin || "13:00",
     tarifaTipo: base?.tarifaTipo || "completa",
     tarifaEspecialActiva: false, tarifaEspecial: "",
     valorSalon: "", // snapshot histórico del valor de salón aplicado ese día en particular

@@ -16,16 +16,16 @@ export function MonthView({ year, month, events, onPrev, onNext, onDayClick }) {
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
-        <button onClick={onPrev} style={{ color: ACCENT }} className="text-xl px-2">‹</button>
-        <h2 style={{ fontFamily: FONT_HEAD, fontSize: 22, color: INK }}>{MESES[month]} {year}</h2>
-        <button onClick={onNext} style={{ color: ACCENT }} className="text-xl px-2">›</button>
+        <button onClick={onPrev} style={{ color: ACCENT }} className="text-2xl px-2">‹</button>
+        <h2 style={{ fontFamily: FONT_HEAD, fontSize: 26, color: INK }}>{MESES[month]} {year}</h2>
+        <button onClick={onNext} style={{ color: ACCENT }} className="text-2xl px-2">›</button>
       </div>
       <div className="grid grid-cols-7 mb-1">
-        {DIAS_CORTOS.map(d => <div key={d} className="text-center text-xs py-1" style={{ color: MUTED, fontFamily: FONT_BODY }}>{d}</div>)}
+        {DIAS_CORTOS.map(d => <div key={d} className="text-center text-sm py-1.5" style={{ color: MUTED, fontFamily: FONT_BODY }}>{d}</div>)}
       </div>
-      <div className="flex flex-col gap-1">
+      <div className="flex flex-col gap-1.5">
         {weeks.map((week, wi) => (
-          <div key={wi} className="grid grid-cols-7 gap-1">
+          <div key={wi} className="grid grid-cols-7 gap-1.5">
             {week.map((d, di) => {
               if (!d) return <div key={di} />;
               const iso = toISO(d);
@@ -33,23 +33,23 @@ export function MonthView({ year, month, events, onPrev, onNext, onDayClick }) {
               const isToday = iso === today;
               return (
                 <button key={di} onClick={() => onDayClick(iso)}
-                  className="text-left p-1.5 rounded"
+                  className="text-left p-2 rounded-lg"
                   style={{
-                    minHeight: 64, background: CARD,
-                    border: isToday ? `1.5px solid ${ACCENT}` : `1px solid ${LINE}`,
+                    minHeight: 112, background: CARD,
+                    border: isToday ? `2px solid ${ACCENT}` : `1px solid ${LINE}`,
                   }}>
-                  <div style={{ fontFamily: FONT_MONO, fontSize: 11, color: INK }}>{d.getDate()}</div>
-                  <div className="flex flex-col gap-0.5 mt-1">
-                    {evs.slice(0, 3).map(e => {
+                  <div style={{ fontFamily: FONT_MONO, fontSize: 14, color: INK, fontWeight: isToday ? 700 : 400 }}>{d.getDate()}</div>
+                  <div className="flex flex-col gap-1 mt-1.5">
+                    {evs.slice(0, 5).map(e => {
                       const bg = e.colorEvento || (e.estadoPago === "total" ? PAGADO_BG : (e.estadoPago === "parcial" || e.estadoPago === "sena") ? PARCIAL_BG : PENDIENTE_BG);
                       const fg = e.colorEvento ? "#fff" : (e.estadoPago === "total" ? PAGADO : (e.estadoPago === "parcial" || e.estadoPago === "sena") ? PARCIAL : PENDIENTE);
                       return (
-                        <div key={e.id} className="truncate rounded px-1" style={{ fontSize: 10, background: bg, color: fg, fontFamily: FONT_BODY }}>
+                        <div key={e.id} className="truncate rounded px-1.5 py-0.5" style={{ fontSize: 12, background: bg, color: fg, fontFamily: FONT_BODY }}>
                           {esMultiDia(e) ? "↔ " : ""}{e.nombreEvento || e.salon || "Evento"}
                         </div>
                       );
                     })}
-                    {evs.length > 3 && <div style={{ fontSize: 10, color: MUTED }}>+{evs.length - 3} más</div>}
+                    {evs.length > 5 && <div style={{ fontSize: 11, color: MUTED }}>+{evs.length - 5} más</div>}
                   </div>
                 </button>
               );

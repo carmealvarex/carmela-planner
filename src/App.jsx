@@ -50,6 +50,12 @@ export default function App() {
     toastTimer.current = setTimeout(() => setToast(null), 2600);
   };
   const [alertasOcultas, setAlertasOcultas] = useState([]);
+  const [loadError, setLoadError] = useState(false);
+  // Guarda cuantos eventos habia la ultima vez que se guardaron con exito.
+  // Si en algun momento se intenta guardar un array vacio habiendo tenido
+  // eventos antes, es señal de un bug (no de que la usuaria borro todo a
+  // mano) y frenamos el guardado en vez de pisar los datos reales.
+  const prevEventsCountRef = useRef(0);
 
   const alertas = useMemo(() => {
     const lista = [];
@@ -97,14 +103,39 @@ export default function App() {
         loadShared("alertasOcultas", []),
         loadShared("presupuestos", []),
       ]);
-      setEvents(ev); setJefeAreas(jefe); setPin(cfg.pin); setProximoVale(cfg.proximoVale || 1);
-      setProximoVoucher(cfg.proximoVoucher || 1); setProximoFicha(cfg.proximoFicha || 1); setProximoComanda(cfg.proximoComanda || 1);
-      setFloorplans(planos); setTarifas(tar); setAlertasOcultas(ocultas); setPresupuestos(presu);
+
+      // Si CUALQUIERA de estas cargas falló (red, timeout, etc.), NO seguimos:
+      // no activamos "ready", así los efectos de autoguardado no se disparan
+      // y no hay riesgo de pisar datos reales con los valores de fallback.
+      const huboFallos = [ev, jefe, cfg, planos, tar, ocultas, presu].some(r => !r.ok);
+      if (huboFallos) {
+        console.error("Fallo la carga inicial de al menos una clave, se aborta para no sobrescribir datos.");
+        setLoadError(true);
+        return;
+      }
+
+      setEvents(ev.value); setJefeAreas(jefe.value); setPin(cfg.value.pin); setProximoVale(cfg.value.proximoVale || 1);
+      setProximoVoucher(cfg.value.proximoVoucher || 1); setProximoFicha(cfg.value.proximoFicha || 1); setProximoComanda(cfg.value.proximoComanda || 1);
+      setFloorplans(planos.value); setTarifas(tar.value); setAlertasOcultas(ocultas.value); setPresupuestos(presu.value);
+      prevEventsCountRef.current = (ev.value || []).length;
       setReady(true);
     })();
   }, []);
 
-  useEffect(() => { if (ready) saveShared("eventos", events); }, [events, ready]);
+  useEffect(() => {
+    if (!ready) return;
+    // Traba de seguridad: si antes había eventos guardados y ahora el
+    // array está vacío, es mucho más probable que sea un bug (carga
+    // fallida, estado pisado, etc.) que un vaciado intencional — nadie
+    // borra 251 eventos de a uno sin querer. Frenamos el guardado.
+    if (events.length === 0 && prevEventsCountRef.current > 0) {
+      console.error(`Se bloqueó un guardado de "eventos" vacío habiendo ${prevEventsCountRef.current} antes. No se guardó nada.`);
+      showToast("⚠️ Se evitó borrar los eventos por seguridad. Recargá la página antes de seguir.");
+      return;
+    }
+    prevEventsCountRef.current = events.length;
+    saveShared("eventos", events);
+  }, [events, ready]);
   useEffect(() => { if (ready) saveShared("jefeAreas", jefeAreas); }, [jefeAreas, ready]);
   useEffect(() => { if (ready) saveShared("planos", floorplans); }, [floorplans, ready]);
   useEffect(() => { if (ready) saveShared("tarifas", tarifas); }, [tarifas, ready]);
@@ -190,6 +221,20 @@ export default function App() {
     setEvents(prev => prev.map(e => e.id === selectedEvent.id ? { ...e, planoDibujo: dataUrl } : e));
     setSelectedEvent(prev => ({ ...prev, planoDibujo: dataUrl }));
   };
+
+  if (loadError) {
+    return (
+      <div style={{ minHeight: "100vh", background: PAPER, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: FONT_BODY, color: INK, textAlign: "center", padding: 24 }}>
+        <div>
+          <p style={{ fontSize: 15, fontWeight: 600, marginBottom: 8 }}>No se pudo conectar con la base de datos.</p>
+          <p style={{ fontSize: 13, color: MUTED, marginBottom: 16 }}>Por tu seguridad, la app no cargó ni va a guardar nada hasta que se resuelva esto. Revisá tu conexión y volvé a intentar.</p>
+          <button onClick={() => window.location.reload()} className="text-sm px-4 py-2 rounded" style={{ background: ACCENT, color: INK, fontFamily: FONT_BODY, fontWeight: 600 }}>
+            Reintentar
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (!ready) {
     return <div style={{ minHeight: "100vh", background: PAPER, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: FONT_BODY, color: MUTED }}>Cargando planner…</div>;

@@ -281,7 +281,7 @@ export default function App() {
         ))}
       </nav>
 
-      <main className="max-w-3xl mx-auto px-5 py-6">
+      <main className={view === "calendario" ? "max-w-5xl mx-auto px-5 py-6" : "max-w-3xl mx-auto px-5 py-6"}>
         {isAdmin && alertas.length > 0 && (
           <div className="no-print flex flex-col gap-2 mb-5">
             <div className="flex justify-end">

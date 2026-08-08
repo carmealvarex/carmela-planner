@@ -155,12 +155,13 @@ export function ImportICS({ onImport }) {
    encima, específico para este evento; la plantilla original
    nunca se modifica.
    ============================================================ */
-export function PlanoEditor({ salon, plantilla, dibujoInicial, onGuardar, onBack, isAdmin }) {
+export function PlanoEditor({ salon, plantilla, dibujoInicial, notasIniciales, onGuardar, onBack, isAdmin }) {
   const canvasRef = useRef(null);
   const [color, setColor] = useState("#96453A");
   const [grosor, setGrosor] = useState(3);
   const dibujandoRef = useRef(false);
   const [guardado, setGuardado] = useState(false);
+  const [notas, setNotas] = useState(notasIniciales || "");
 
   const cargarBase = (src) => {
     const canvas = canvasRef.current;
@@ -177,6 +178,7 @@ export function PlanoEditor({ salon, plantilla, dibujoInicial, onGuardar, onBack
   };
 
   useEffect(() => { cargarBase(dibujoInicial || plantilla); }, [plantilla, dibujoInicial]);
+  useEffect(() => { setNotas(notasIniciales || ""); }, [notasIniciales]);
 
   const getPos = (e) => {
     const canvas = canvasRef.current;
@@ -214,9 +216,24 @@ export function PlanoEditor({ salon, plantilla, dibujoInicial, onGuardar, onBack
 
   const borrarDibujo = () => cargarBase(plantilla);
 
+  // Subir una foto o archivo (por ejemplo, una foto de un plano hecho a
+  // mano) para usar en vez de dibujar sobre la plantilla. Reemplaza lo que
+  // haya en el lienzo por la imagen subida; después se puede seguir
+  // dibujando encima si hace falta, y se guarda igual que un dibujo normal.
+  const subirArchivo = (file) => {
+    if (!file || !isAdmin) return;
+    if (!file.type.startsWith("image/")) {
+      window.alert("Por ahora solo se pueden subir imágenes (foto o captura del plano), no otros tipos de archivo.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => cargarBase(reader.result);
+    reader.readAsDataURL(file);
+  };
+
   const guardar = () => {
     const dataUrl = canvasRef.current.toDataURL("image/png");
-    onGuardar(dataUrl);
+    onGuardar(dataUrl, notas);
     setGuardado(true);
     setTimeout(() => setGuardado(false), 1500);
   };
@@ -259,6 +276,19 @@ export function PlanoEditor({ salon, plantilla, dibujoInicial, onGuardar, onBack
         {!isAdmin && <span style={{ fontFamily: FONT_BODY, fontSize: 12, color: MUTED }}>Solo lectura · el invitado no puede dibujar</span>}
         <button onClick={onBack} className="px-4 py-2 rounded text-sm font-medium ml-auto" style={{ border: `1px solid ${LINE}`, color: INK, fontFamily: FONT_BODY }}>Volver</button>
       </div>
+
+      {isAdmin && (
+        <div className="no-print mb-4">
+          <DropZone
+            inputId="input-plano-foto"
+            accept="image/*"
+            label="Subir foto o archivo del plano"
+            hint="¿Ya hiciste el plano a mano? Arrastrá la foto acá o tocá el botón, y reemplaza lo que hay dibujado"
+            onFile={subirArchivo}
+          />
+        </div>
+      )}
+
       <div className="p-6" style={{ background: CARD, border: `1px solid ${INK}`, maxWidth: 640, margin: "0 auto" }}>
         <PrintHeader eyebrow="Plano de armado" titulo={salon || "Salón"} />
         <canvas
@@ -272,6 +302,25 @@ export function PlanoEditor({ salon, plantilla, dibujoInicial, onGuardar, onBack
             ? "Dibujá directamente sobre el plano con el dedo o el mouse para armar la disposición de este evento en particular. La plantilla original del salón (en Ajustes) no se modifica."
             : "Este plano es de solo lectura para invitados."}
         </p>
+
+        <div style={{ marginTop: 16, borderTop: `1px solid ${LINE}`, paddingTop: 12 }}>
+          <label style={{ fontFamily: FONT_BODY, fontSize: 12, color: MUTED, textTransform: "uppercase", letterSpacing: "0.05em", display: "block", marginBottom: 6 }}>
+            Anotaciones del plano
+          </label>
+          {isAdmin ? (
+            <textarea
+              value={notas}
+              onChange={e => setNotas(e.target.value)}
+              placeholder="Ej: mesas contra la ventana, dejar pasillo libre en el centro, tarima al fondo…"
+              rows={3}
+              className="no-print w-full rounded p-2"
+              style={{ border: `1px solid ${LINE}`, fontFamily: FONT_BODY, fontSize: 13, color: INK, resize: "vertical" }}
+            />
+          ) : (
+            <p style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK, whiteSpace: "pre-wrap" }}>{notas || "Sin anotaciones."}</p>
+          )}
+          {isAdmin && notas && <p className="print-only" style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK, whiteSpace: "pre-wrap", marginTop: 4 }}>{notas}</p>}
+        </div>
       </div>
     </div>
   );

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { ACCENT, ACCENT_DARK, CARD, FONT_BODY, FONT_HEAD, HILITE_BG, INK, INK_SOFT, LINE, MUTED, PAGADO, PAPER, PENDIENTE } from "../constants.js";
+import { ACCENT, ACCENT_DARK, CARD, COLORES_EVENTO, FONT_BODY, FONT_HEAD, HILITE_BG, INK, INK_SOFT, LINE, MUTED, PAGADO, PAPER, PENDIENTE } from "../constants.js";
 import { uid } from "../utils/helpers.js";
 import { extractICSFromZip, parseICS } from "../utils/ics.js";
 import { blankEvent } from "../utils/eventHelpers.js";
@@ -156,23 +156,47 @@ export function ImportICS({ onImport }) {
    nunca se modifica.
    ============================================================ */
 export function PlanoEditor({ salon, plantilla, dibujoInicial, notasIniciales, onGuardar, onBack, isAdmin }) {
-  const canvasRef = useRef(null);
+  const canvasRef = useRef(null); // lo que se ve: base + trazos ya combinados
+  const trazosCanvasRef = useRef(null); // capa invisible: solo lo dibujado en esta sesión (para poder borrar un trazo sin tocar la base)
+  const baseImgRef = useRef(null); // la plantilla o el último dibujo guardado, tal cual, intacto
+  const historialRef = useRef([]); // snapshots de la capa de trazos, para "Deshacer"
+  const dibujandoRef = useRef(false);
+
   const [color, setColor] = useState("#96453A");
   const [grosor, setGrosor] = useState(3);
-  const dibujandoRef = useRef(false);
+  const [modo, setModo] = useState("lapiz"); // "lapiz" | "goma"
+  const [puedeDeshacer, setPuedeDeshacer] = useState(false);
   const [guardado, setGuardado] = useState(false);
   const [notas, setNotas] = useState(notasIniciales || "");
 
-  const cargarBase = (src) => {
-    const canvas = canvasRef.current;
-    if (!canvas || !src) return;
+  // Combina la base (plantilla/dibujo guardado) con la capa de trazos de
+  // esta sesión y lo pinta en el canvas visible. Se llama después de
+  // cualquier cambio (trazo nuevo, goma, deshacer, etc.).
+  const render = () => {
+    const canvas = canvasRef.current, trazos = trazosCanvasRef.current, base = baseImgRef.current;
+    if (!canvas || !trazos || !base) return;
     const ctx = canvas.getContext("2d");
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(base, 0, 0);
+    ctx.drawImage(trazos, 0, 0);
+  };
+
+  const cargarBase = (src) => {
+    if (!src) return;
     const img = new Image();
     img.onload = () => {
+      const canvas = canvasRef.current;
       canvas.width = img.width;
       canvas.height = img.height;
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(img, 0, 0);
+      baseImgRef.current = img;
+      // Nueva capa de trazos en blanco, del mismo tamaño que la base.
+      const trazos = document.createElement("canvas");
+      trazos.width = img.width;
+      trazos.height = img.height;
+      trazosCanvasRef.current = trazos;
+      historialRef.current = [];
+      setPuedeDeshacer(false);
+      render();
     };
     img.src = src;
   };
@@ -194,7 +218,12 @@ export function PlanoEditor({ salon, plantilla, dibujoInicial, notasIniciales, o
     if (!isAdmin) return;
     e.preventDefault();
     dibujandoRef.current = true;
-    const ctx = canvasRef.current.getContext("2d");
+    // Guarda una foto de cómo estaba la capa de trazos ANTES de este trazo,
+    // para poder deshacer solo este trazo sin perder los anteriores ni la plantilla.
+    historialRef.current.push(trazosCanvasRef.current.toDataURL());
+    if (historialRef.current.length > 25) historialRef.current.shift(); // no acumular de más
+    setPuedeDeshacer(true);
+    const ctx = trazosCanvasRef.current.getContext("2d");
     const { x, y } = getPos(e);
     ctx.beginPath();
     ctx.moveTo(x, y);
@@ -203,18 +232,45 @@ export function PlanoEditor({ salon, plantilla, dibujoInicial, notasIniciales, o
     if (!isAdmin) return;
     if (!dibujandoRef.current) return;
     e.preventDefault();
-    const ctx = canvasRef.current.getContext("2d");
+    const ctx = trazosCanvasRef.current.getContext("2d");
     const { x, y } = getPos(e);
+    ctx.globalCompositeOperation = modo === "goma" ? "destination-out" : "source-over";
     ctx.strokeStyle = color;
-    ctx.lineWidth = grosor;
+    ctx.lineWidth = modo === "goma" ? grosor * 4 : grosor;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
     ctx.lineTo(x, y);
     ctx.stroke();
+    render();
   };
   const endDraw = () => { dibujandoRef.current = false; };
 
-  const borrarDibujo = () => cargarBase(plantilla);
+  // Deshace el último trazo (lápiz o goma) sin tocar la plantilla ni los
+  // trazos anteriores a ese.
+  const deshacer = () => {
+    if (!historialRef.current.length) return;
+    const anterior = historialRef.current.pop();
+    const img = new Image();
+    img.onload = () => {
+      const trazos = trazosCanvasRef.current;
+      const ctx = trazos.getContext("2d");
+      ctx.clearRect(0, 0, trazos.width, trazos.height);
+      ctx.drawImage(img, 0, 0);
+      render();
+      setPuedeDeshacer(historialRef.current.length > 0);
+    };
+    img.src = anterior;
+  };
+
+  // Borra TODO lo dibujado en esta sesión y vuelve a la plantilla/dibujo
+  // guardado tal cual estaba al abrir el editor.
+  const borrarDibujo = () => {
+    const trazos = trazosCanvasRef.current;
+    trazos.getContext("2d").clearRect(0, 0, trazos.width, trazos.height);
+    historialRef.current = [];
+    setPuedeDeshacer(false);
+    render();
+  };
 
   // Subir una foto o archivo (por ejemplo, una foto de un plano hecho a
   // mano) para usar en vez de dibujar sobre la plantilla. Reemplaza lo que
@@ -238,6 +294,25 @@ export function PlanoEditor({ salon, plantilla, dibujoInicial, notasIniciales, o
     setTimeout(() => setGuardado(false), 1500);
   };
 
+  // Descarga el plano actual (base + lo dibujado) como archivo .jpg,
+  // para compartirlo por WhatsApp, imprimirlo aparte, etc.
+  const descargarJPG = () => {
+    const origen = canvasRef.current;
+    // JPG no soporta transparencia: se vuelca todo sobre un fondo blanco primero.
+    const temp = document.createElement("canvas");
+    temp.width = origen.width;
+    temp.height = origen.height;
+    const ctx = temp.getContext("2d");
+    ctx.fillStyle = "#FFFFFF";
+    ctx.fillRect(0, 0, temp.width, temp.height);
+    ctx.drawImage(origen, 0, 0);
+    const link = document.createElement("a");
+    const nombreSalon = (salon || "salon").toLowerCase().replace(/[^a-z0-9]+/g, "-");
+    link.download = `plano-${nombreSalon}.jpg`;
+    link.href = temp.toDataURL("image/jpeg", 0.92);
+    link.click();
+  };
+
   if (!plantilla) {
     return (
       <div>
@@ -253,29 +328,47 @@ export function PlanoEditor({ salon, plantilla, dibujoInicial, notasIniciales, o
 
   return (
     <div>
-      <div className="no-print flex gap-2 mb-4 flex-wrap items-center">
+      <div className="no-print flex gap-2 mb-3 flex-wrap items-center">
         <button onClick={() => window.print()} className="px-4 py-2 rounded text-sm font-medium" style={{ background: INK_SOFT, color: PAPER, fontFamily: FONT_BODY }}>Imprimir plano</button>
+        <button onClick={descargarJPG} className="px-4 py-2 rounded text-sm font-medium" style={{ border: `1px solid ${LINE}`, color: INK, fontFamily: FONT_BODY }}>Descargar en JPG</button>
         {isAdmin && <button onClick={guardar} className="px-4 py-2 rounded text-sm font-medium" style={{ background: PAGADO, color: PAPER, fontFamily: FONT_BODY }}>{guardado ? "¡Guardado!" : "Guardar dibujo del evento"}</button>}
-        {isAdmin && <button onClick={borrarDibujo} className="px-3 py-2 rounded text-xs font-medium" style={{ border: `1px solid ${PENDIENTE}`, color: PENDIENTE, fontFamily: FONT_BODY }}>Borrar y volver a la plantilla</button>}
         {isAdmin && (
-          <div className="flex items-center gap-1.5 px-2">
-            <span style={{ fontFamily: FONT_BODY, fontSize: 12, color: MUTED }}>Color:</span>
-            {["#96453A", "#4A6FA5", "#5C7A5E", "#2C1F1B", "#FFFFFF"].map(c => (
-              <button key={c} onClick={() => setColor(c)} style={{ width: 20, height: 20, borderRadius: "50%", background: c, border: color === c ? `2px solid ${INK}` : `1px solid ${LINE}` }} />
-            ))}
-          </div>
+          <button onClick={deshacer} disabled={!puedeDeshacer} className="px-3 py-2 rounded text-xs font-medium" style={{ border: `1px solid ${LINE}`, color: puedeDeshacer ? INK : MUTED, opacity: puedeDeshacer ? 1 : 0.5, fontFamily: FONT_BODY }}>
+            ↩ Deshacer
+          </button>
         )}
-        {isAdmin && (
+        {isAdmin && <button onClick={borrarDibujo} className="px-3 py-2 rounded text-xs font-medium" style={{ border: `1px solid ${PENDIENTE}`, color: PENDIENTE, fontFamily: FONT_BODY }}>Borrar todo y volver a la plantilla</button>}
+        {!isAdmin && <span style={{ fontFamily: FONT_BODY, fontSize: 12, color: MUTED }}>Solo lectura · el invitado no puede dibujar</span>}
+        <button onClick={onBack} className="px-4 py-2 rounded text-sm font-medium ml-auto" style={{ border: `1px solid ${LINE}`, color: INK, fontFamily: FONT_BODY }}>Volver</button>
+      </div>
+
+      {isAdmin && (
+        <div className="no-print flex gap-2 mb-3 flex-wrap items-center">
+          <div className="flex items-center gap-1.5">
+            <button onClick={() => setModo("lapiz")} className="text-xs px-3 py-1.5 rounded font-medium" style={{ border: `1px solid ${modo === "lapiz" ? ACCENT : LINE}`, background: modo === "lapiz" ? ACCENT : "transparent", color: modo === "lapiz" ? "#fff" : INK, fontFamily: FONT_BODY }}>
+              ✏️ Lápiz
+            </button>
+            <button onClick={() => setModo("goma")} className="text-xs px-3 py-1.5 rounded font-medium" style={{ border: `1px solid ${modo === "goma" ? ACCENT : LINE}`, background: modo === "goma" ? ACCENT : "transparent", color: modo === "goma" ? "#fff" : INK, fontFamily: FONT_BODY }}>
+              🧹 Goma
+            </button>
+          </div>
           <div className="flex items-center gap-1.5">
             <span style={{ fontFamily: FONT_BODY, fontSize: 12, color: MUTED }}>Grosor:</span>
             {[2, 4, 7].map(g => (
               <button key={g} onClick={() => setGrosor(g)} className="text-xs px-2 py-1 rounded" style={{ border: `1px solid ${grosor === g ? ACCENT : LINE}`, background: grosor === g ? ACCENT : "transparent", color: grosor === g ? "#fff" : INK }}>{g}</button>
             ))}
           </div>
-        )}
-        {!isAdmin && <span style={{ fontFamily: FONT_BODY, fontSize: 12, color: MUTED }}>Solo lectura · el invitado no puede dibujar</span>}
-        <button onClick={onBack} className="px-4 py-2 rounded text-sm font-medium ml-auto" style={{ border: `1px solid ${LINE}`, color: INK, fontFamily: FONT_BODY }}>Volver</button>
-      </div>
+        </div>
+      )}
+
+      {isAdmin && modo === "lapiz" && (
+        <div className="no-print flex flex-wrap items-center gap-1.5 mb-3 px-1">
+          <span style={{ fontFamily: FONT_BODY, fontSize: 12, color: MUTED, marginRight: 2 }}>Color:</span>
+          {COLORES_EVENTO.map(c => (
+            <button key={c.valor} title={c.nombre} onClick={() => setColor(c.valor)} style={{ width: 20, height: 20, borderRadius: "50%", background: c.valor, border: color === c.valor ? `2px solid ${INK}` : `1px solid ${LINE}`, flexShrink: 0 }} />
+          ))}
+        </div>
+      )}
 
       {isAdmin && (
         <div className="no-print mb-4">

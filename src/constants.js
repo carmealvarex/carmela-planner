@@ -96,11 +96,11 @@ export const COLORES_EVENTO = [
   { nombre: "Mostaza", valor: "#8C6A1E" },
   { nombre: "Rojo", valor: "#96453A" },
   { nombre: "Gris marca", valor: "#4F3C37" },
-  { nombre: "Lila", valor: "#7A6A99" },
-  { nombre: "Terracota", valor: "#B0703C" },
-  { nombre: "Celeste", valor: "#5E8AA3" },
-  { nombre: "Turquesa", valor: "#4A8C82" },
-  { nombre: "Amarillo suave", valor: "#C9A24B" },
-  { nombre: "Coral", valor: "#C97064" },
+  { nombre: "Turquesa", valor: "#2EC4B6" },
+  { nombre: "Fucsia", valor: "#EC4899" },
+  { nombre: "Lavanda", valor: "#9B7FD4" },
+  { nombre: "Celeste", valor: "#4FC3F7" },
+  { nombre: "Menta", valor: "#3DDC97" },
+  { nombre: "Amarillo", valor: "#FFD93D" },
 ];
 

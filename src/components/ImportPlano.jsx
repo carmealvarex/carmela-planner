@@ -155,7 +155,18 @@ export function ImportICS({ onImport }) {
    encima, específico para este evento; la plantilla original
    nunca se modifica.
    ============================================================ */
-export function PlanoEditor({ salon, nombreEvento, plantilla, dibujoInicial, notasIniciales, onGuardar, onBack, isAdmin }) {
+// Formatea una fecha ISO (YYYY-MM-DD) como "Miércoles 12 de Agosto", igual
+// que en el resto de las aplicaciones (comanda, cronograma, etc).
+function formatFechaLarga(fechaISO) {
+  if (!fechaISO) return "";
+  const [y, m, d] = fechaISO.split("-").map(Number);
+  if (!y || !m || !d) return "";
+  const fecha = new Date(y, m - 1, d);
+  const texto = fecha.toLocaleDateString("es-AR", { weekday: "long", day: "numeric", month: "long" });
+  return texto.charAt(0).toUpperCase() + texto.slice(1);
+}
+
+export function PlanoEditor({ salon, nombreEvento, fecha, plantilla, dibujoInicial, notasIniciales, onGuardar, onBack, isAdmin }) {
   const canvasRef = useRef(null); // lo que se ve: base + trazos ya combinados
   const trazosCanvasRef = useRef(null); // capa invisible: solo lo dibujado en esta sesión (para poder borrar un trazo sin tocar la base)
   const baseImgRef = useRef(null); // la plantilla o el último dibujo guardado, tal cual, intacto
@@ -385,9 +396,11 @@ export function PlanoEditor({ salon, nombreEvento, plantilla, dibujoInicial, not
 
       <div className="p-6" style={{ background: CARD, border: `1px solid ${INK}`, maxWidth: 640, margin: "0 auto" }}>
         <PrintHeader eyebrow="Plano de armado" titulo={salon || "Salón"} />
-        {nombreEvento && (
+        {(nombreEvento || fecha) && (
           <p style={{ fontFamily: FONT_BODY, fontWeight: 600, color: ACCENT, fontSize: 15, marginTop: -8, marginBottom: 12 }}>
             {nombreEvento}
+            {nombreEvento && fecha ? " — " : ""}
+            {formatFechaLarga(fecha)}
           </p>
         )}
         <canvas

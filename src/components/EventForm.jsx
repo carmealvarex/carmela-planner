@@ -166,7 +166,10 @@ export function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
     setEv(prev => ({ ...prev, cronograma: [...(prev.cronograma || []), { id: uid(), hora: nuevaHora, detalle: nuevoDetalle.trim() }] }));
     setNuevaHora(""); setNuevoDetalle("");
   };
-  const quitarCronograma = (id) => setEv(prev => ({ ...prev, cronograma: prev.cronograma.filter(c => c.id !== id) }));
+  const quitarCronograma = (id) => {
+    if (!window.confirm("¿Seguro que querés quitar este horario del cronograma?")) return;
+    setEv(prev => ({ ...prev, cronograma: prev.cronograma.filter(c => c.id !== id) }));
+  };
   const cronoOrdenado = (ev.cronograma || []).slice().sort((a, b) => (a.hora || "").localeCompare(b.hora || ""));
 
   const [nuevoRecordatorio, setNuevoRecordatorio] = useState({ texto: "", diasAntes: "2" });
@@ -869,7 +872,7 @@ export function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
             <div key={c.id} className="flex items-center gap-2 p-2 rounded" style={{ background: HILITE_BG }}>
               <span style={{ fontFamily: FONT_MONO, fontSize: 12.5, color: INK, minWidth: 54 }}>{c.hora}</span>
               <span style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK, flex: 1 }}>{c.detalle}</span>
-              <button onClick={() => quitarCronograma(c.id)} style={{ color: PENDIENTE, fontSize: 12 }}>Quitar</button>
+              <button type="button" onClick={() => quitarCronograma(c.id)} style={{ color: PENDIENTE, fontSize: 12, padding: "6px 8px", marginLeft: 4 }}>Quitar</button>
             </div>
           ))}
           {!cronoOrdenado.length && <p style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: MUTED }}>Sin ítems todavía. Ej: 18:00 prueba de sonido, 20:30 llegada de invitados, 21:30 coffee break, 22:00 charla, 23:00 finger food, 23:40 postre.</p>}

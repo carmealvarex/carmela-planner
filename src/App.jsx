@@ -375,6 +375,7 @@ export default function App() {
         {view === "plano" && selectedEvent && (
           <PlanoEditor
             salon={selectedEvent.salon}
+            nombreEvento={selectedEvent.nombreEvento}
             plantilla={floorplans[selectedEvent.salon]}
             dibujoInicial={selectedEvent.planoDibujo}
             notasIniciales={selectedEvent.planoNotas}

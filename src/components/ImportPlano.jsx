@@ -155,7 +155,7 @@ export function ImportICS({ onImport }) {
    encima, específico para este evento; la plantilla original
    nunca se modifica.
    ============================================================ */
-export function PlanoEditor({ salon, plantilla, dibujoInicial, notasIniciales, onGuardar, onBack, isAdmin }) {
+export function PlanoEditor({ salon, nombreEvento, plantilla, dibujoInicial, notasIniciales, onGuardar, onBack, isAdmin }) {
   const canvasRef = useRef(null); // lo que se ve: base + trazos ya combinados
   const trazosCanvasRef = useRef(null); // capa invisible: solo lo dibujado en esta sesión (para poder borrar un trazo sin tocar la base)
   const baseImgRef = useRef(null); // la plantilla o el último dibujo guardado, tal cual, intacto
@@ -308,7 +308,8 @@ export function PlanoEditor({ salon, plantilla, dibujoInicial, notasIniciales, o
     ctx.drawImage(origen, 0, 0);
     const link = document.createElement("a");
     const nombreSalon = (salon || "salon").toLowerCase().replace(/[^a-z0-9]+/g, "-");
-    link.download = `plano-${nombreSalon}.jpg`;
+    const nombreEv = (nombreEvento || "").toLowerCase().replace(/[^a-z0-9]+/g, "-");
+    link.download = nombreEv ? `plano-${nombreSalon}-${nombreEv}.jpg` : `plano-${nombreSalon}.jpg`;
     link.href = temp.toDataURL("image/jpeg", 0.92);
     link.click();
   };
@@ -384,6 +385,11 @@ export function PlanoEditor({ salon, plantilla, dibujoInicial, notasIniciales, o
 
       <div className="p-6" style={{ background: CARD, border: `1px solid ${INK}`, maxWidth: 640, margin: "0 auto" }}>
         <PrintHeader eyebrow="Plano de armado" titulo={salon || "Salón"} />
+        {nombreEvento && (
+          <p style={{ fontFamily: FONT_BODY, fontWeight: 600, color: ACCENT, fontSize: 15, marginTop: -8, marginBottom: 12 }}>
+            {nombreEvento}
+          </p>
+        )}
         <canvas
           ref={canvasRef}
           onMouseDown={startDraw} onMouseMove={draw} onMouseUp={endDraw} onMouseLeave={endDraw}

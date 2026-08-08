@@ -217,9 +217,9 @@ export default function App() {
     setEvents(prev => prev.map(e => ((e.fechaFin || e.fecha) < hoyISO && e.estadoPago !== "total") ? { ...e, estadoPago: "total" } : e));
     showToast(`${cantidad} evento(s) marcados como pagados ✓`);
   };
-  const handleSavePlano = (dataUrl) => {
-    setEvents(prev => prev.map(e => e.id === selectedEvent.id ? { ...e, planoDibujo: dataUrl } : e));
-    setSelectedEvent(prev => ({ ...prev, planoDibujo: dataUrl }));
+  const handleSavePlano = (dataUrl, notas) => {
+    setEvents(prev => prev.map(e => e.id === selectedEvent.id ? { ...e, planoDibujo: dataUrl, planoNotas: notas } : e));
+    setSelectedEvent(prev => ({ ...prev, planoDibujo: dataUrl, planoNotas: notas }));
   };
 
   if (loadError) {
@@ -377,6 +377,7 @@ export default function App() {
             salon={selectedEvent.salon}
             plantilla={floorplans[selectedEvent.salon]}
             dibujoInicial={selectedEvent.planoDibujo}
+            notasIniciales={selectedEvent.planoNotas}
             onGuardar={handleSavePlano}
             onBack={() => setView("ficha")}
             isAdmin={isAdmin}

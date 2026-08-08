@@ -148,19 +148,26 @@ export function DayView({ dia, setDia, events, isAdmin, onOpenEvent, onNewEvent 
       </div>
 
       <div className="flex flex-col gap-2">
-        {evsDia.map(e => (
-          <button key={e.id} onClick={() => onOpenEvent(e)} className="text-left p-3 rounded flex items-center justify-between" style={{ background: CARD, border: `1px solid ${LINE}` }}>
-            <div>
-              <div style={{ fontFamily: FONT_BODY, fontWeight: 600, color: INK, fontSize: 14 }}>
-                {esMultiDia(e) ? "↔ " : ""}{e.nombreEvento || e.salon || "Evento"}
+        {evsDia.map(e => {
+          const tieneColor = !!e.colorEvento;
+          return (
+            <button key={e.id} onClick={() => onOpenEvent(e)} className="text-left p-3 rounded flex items-center justify-between"
+              style={{
+                background: tieneColor ? e.colorEvento : CARD,
+                border: tieneColor ? `1px solid ${e.colorEvento}` : `1px solid ${LINE}`,
+              }}>
+              <div>
+                <div style={{ fontFamily: FONT_BODY, fontWeight: 600, color: tieneColor ? "#fff" : INK, fontSize: 14 }}>
+                  {esMultiDia(e) ? "↔ " : ""}{e.nombreEvento || e.salon || "Evento"}
+                </div>
+                <div style={{ fontFamily: FONT_BODY, fontSize: 12, color: tieneColor ? "rgba(255,255,255,0.85)" : MUTED }}>
+                  {e.salon || "Sin salón"} · {e.horaInicio}–{e.horaFin} · {e.personas || "?"} personas
+                </div>
               </div>
-              <div style={{ fontFamily: FONT_BODY, fontSize: 12, color: MUTED }}>
-                {e.salon || "Sin salón"} · {e.horaInicio}–{e.horaFin} · {e.personas || "?"} personas
-              </div>
-            </div>
-            <Stamp estadoPago={e.estadoPago} />
-          </button>
-        ))}
+              <Stamp estadoPago={e.estadoPago} />
+            </button>
+          );
+        })}
         {!evsDia.length && <p style={{ fontFamily: FONT_BODY, fontSize: 13, color: MUTED }}>Sin eventos cargados este día.</p>}
         {isAdmin && (
           <button onClick={() => onNewEvent(toISO(dia))} className="p-3 rounded text-sm" style={{ border: `1px dashed ${ACCENT}`, color: ACCENT, fontFamily: FONT_BODY }}>

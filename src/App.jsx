@@ -50,6 +50,10 @@ export default function App() {
     toastTimer.current = setTimeout(() => setToast(null), 2600);
   };
   const [alertasOcultas, setAlertasOcultas] = useState([]);
+  // Notificaciones "pospuestas": id de la alerta -> fecha/hora (ISO) hasta la
+  // cual hay que ocultarla. Pasado ese momento, vuelve a aparecer sola.
+  const [alertasPospuestas, setAlertasPospuestas] = useState({});
+  const [notifAbiertas, setNotifAbiertas] = useState(false);
   const [loadError, setLoadError] = useState(false);
   // Guarda cuantos eventos habia la ultima vez que se guardaron con exito.
   // Si en algun momento se intenta guardar un array vacio habiendo tenido
@@ -87,27 +91,43 @@ export default function App() {
         }
       });
     });
+    const ahora = Date.now();
     return lista
       .filter(a => !alertasOcultas.includes(a.id))
+      .filter(a => !(alertasPospuestas[a.id] && new Date(alertasPospuestas[a.id]).getTime() > ahora))
       .sort((a, b) => (a.urgente === b.urgente ? 0 : a.urgente ? -1 : 1));
-  }, [events, alertasOcultas]);
+  }, [events, alertasOcultas, alertasPospuestas]);
+
+  // Posponer una notificación: vuelve a aparecer sola pasadas las horas indicadas.
+  const posponerAlerta = (id, horas) => {
+    const hasta = new Date(Date.now() + horas * 60 * 60 * 1000).toISOString();
+    setAlertasPospuestas(prev => ({ ...prev, [id]: hasta }));
+  };
+  // Posponer hasta mañana a las 9:00.
+  const posponerHastaManana = (id) => {
+    const manana = new Date();
+    manana.setDate(manana.getDate() + 1);
+    manana.setHours(9, 0, 0, 0);
+    setAlertasPospuestas(prev => ({ ...prev, [id]: manana.toISOString() }));
+  };
 
   useEffect(() => {
     (async () => {
-      const [ev, jefe, cfg, planos, tar, ocultas, presu] = await Promise.all([
+      const [ev, jefe, cfg, planos, tar, ocultas, pospuestas, presu] = await Promise.all([
         loadShared("eventos", []),
         loadShared("jefeAreas", { telefono: "" }),
         loadShared("config", { pin: null, proximoVale: 1, proximoVoucher: 1, proximoFicha: 1, proximoComanda: 1 }),
         loadShared("planos", {}),
         loadShared("tarifas", {}),
         loadShared("alertasOcultas", []),
+        loadShared("alertasPospuestas", {}),
         loadShared("presupuestos", []),
       ]);
 
       // Si CUALQUIERA de estas cargas falló (red, timeout, etc.), NO seguimos:
       // no activamos "ready", así los efectos de autoguardado no se disparan
       // y no hay riesgo de pisar datos reales con los valores de fallback.
-      const huboFallos = [ev, jefe, cfg, planos, tar, ocultas, presu].some(r => !r.ok);
+      const huboFallos = [ev, jefe, cfg, planos, tar, ocultas, pospuestas, presu].some(r => !r.ok);
       if (huboFallos) {
         console.error("Fallo la carga inicial de al menos una clave, se aborta para no sobrescribir datos.");
         setLoadError(true);
@@ -116,7 +136,7 @@ export default function App() {
 
       setEvents(ev.value); setJefeAreas(jefe.value); setPin(cfg.value.pin); setProximoVale(cfg.value.proximoVale || 1);
       setProximoVoucher(cfg.value.proximoVoucher || 1); setProximoFicha(cfg.value.proximoFicha || 1); setProximoComanda(cfg.value.proximoComanda || 1);
-      setFloorplans(planos.value); setTarifas(tar.value); setAlertasOcultas(ocultas.value); setPresupuestos(presu.value);
+      setFloorplans(planos.value); setTarifas(tar.value); setAlertasOcultas(ocultas.value); setAlertasPospuestas(pospuestas.value); setPresupuestos(presu.value);
       prevEventsCountRef.current = (ev.value || []).length;
       setReady(true);
     })();
@@ -142,6 +162,7 @@ export default function App() {
   // Las notificaciones que la persona ya descartó (tocando la "×") se guardan acá, para que
   // no vuelvan a aparecer cada vez que se abre la app.
   useEffect(() => { if (ready) saveShared("alertasOcultas", alertasOcultas); }, [alertasOcultas, ready]);
+  useEffect(() => { if (ready) saveShared("alertasPospuestas", alertasPospuestas); }, [alertasPospuestas, ready]);
   useEffect(() => { if (ready) saveShared("presupuestos", presupuestos); }, [presupuestos, ready]);
 
   const setPinIfEmpty = (p) => { setPin(p); saveShared("config", { pin: p, proximoVale, proximoVoucher, proximoFicha, proximoComanda }); };
@@ -264,6 +285,108 @@ export default function App() {
           <h1 style={{ fontFamily: FONT_HEAD, fontSize: 19, color: PAPER }}>Planner de Eventos</h1>
         </div>
         <div className="flex items-center gap-3">
+          {isAdmin && (
+            <div style={{ position: "relative" }}>
+              <button
+                onClick={() => setNotifAbiertas(v => !v)}
+                aria-label="Notificaciones"
+                style={{ position: "relative", background: "none", border: "none", cursor: "pointer", padding: 4, lineHeight: 1 }}
+              >
+                <span style={{ fontSize: 19 }}>🔔</span>
+                {alertas.length > 0 && (
+                  <span style={{
+                    position: "absolute", top: -3, right: -3, background: PENDIENTE, color: "#fff",
+                    borderRadius: "50%", fontSize: 10, minWidth: 16, height: 16, padding: "0 3px",
+                    display: "flex", alignItems: "center", justifyContent: "center", fontFamily: FONT_BODY,
+                  }}>
+                    {alertas.length}
+                  </span>
+                )}
+              </button>
+
+              {notifAbiertas && (
+                <div
+                  className="no-print"
+                  onClick={() => setNotifAbiertas(false)}
+                  style={{ position: "fixed", inset: 0, zIndex: 55 }}
+                />
+              )}
+              {notifAbiertas && (
+                <div className="no-print" onClick={e => e.stopPropagation()} style={{
+                  position: "absolute", top: "calc(100% + 10px)", right: 0, width: 320, maxWidth: "88vw",
+                  maxHeight: 440, overflowY: "auto", background: CARD, border: `1px solid ${LINE}`,
+                  borderRadius: 8, boxShadow: "0 10px 28px rgba(0,0,0,0.18)", padding: 12, zIndex: 60,
+                }}>
+                  <div className="flex items-center justify-between mb-2">
+                    <span style={{ fontFamily: FONT_BODY, fontSize: 12.5, fontWeight: 600, color: INK }}>
+                      Notificaciones {alertas.length > 0 ? `(${alertas.length})` : ""}
+                    </span>
+                    {alertas.length > 0 && (
+                      <button
+                        onClick={() => setAlertasOcultas(prev => [...prev, ...alertas.map(a => a.id)])}
+                        style={{ fontFamily: FONT_BODY, fontSize: 11, color: MUTED, textDecoration: "underline", background: "none", border: "none", cursor: "pointer" }}
+                      >
+                        Descartar todas
+                      </button>
+                    )}
+                  </div>
+
+                  {alertas.length === 0 ? (
+                    <p style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: MUTED, padding: "6px 2px" }}>
+                      No hay notificaciones pendientes.
+                    </p>
+                  ) : (
+                    <div className="flex flex-col gap-2">
+                      {alertas.map(a => (
+                        <div key={a.id} className="p-2.5 rounded"
+                          style={{ background: a.urgente ? PENDIENTE_BG : PARCIAL_BG, border: `1px solid ${a.urgente ? PENDIENTE : PARCIAL}` }}>
+                          <button
+                            onClick={() => { setSelectedEvent(a.ev); setView("ficha"); setNotifAbiertas(false); }}
+                            className="text-left w-full"
+                            style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: INK, background: "none", border: "none", cursor: "pointer" }}
+                          >
+                            {a.texto}
+                          </button>
+                          <div className="flex items-center gap-1.5 flex-wrap mt-2">
+                            {a.id.startsWith("pago-") && (
+                              <button
+                                onClick={() => setEvents(prev => prev.map(e => e.id === a.ev.id ? { ...e, estadoPago: "total" } : e))}
+                                className="text-xs px-2 py-0.5 rounded"
+                                style={{ fontFamily: FONT_BODY, color: INK, border: `1px solid ${LINE}`, background: CARD, whiteSpace: "nowrap" }}
+                              >
+                                Marcar pagado
+                              </button>
+                            )}
+                            <button
+                              onClick={() => posponerAlerta(a.id, 1)}
+                              className="text-xs px-2 py-0.5 rounded"
+                              style={{ fontFamily: FONT_BODY, color: INK, border: `1px solid ${LINE}`, background: CARD, whiteSpace: "nowrap" }}
+                            >
+                              En 1 hora
+                            </button>
+                            <button
+                              onClick={() => posponerHastaManana(a.id)}
+                              className="text-xs px-2 py-0.5 rounded"
+                              style={{ fontFamily: FONT_BODY, color: INK, border: `1px solid ${LINE}`, background: CARD, whiteSpace: "nowrap" }}
+                            >
+                              Mañana
+                            </button>
+                            <button
+                              onClick={() => setAlertasOcultas(prev => [...prev, a.id])}
+                              className="text-xs px-2 py-0.5 rounded ml-auto"
+                              style={{ fontFamily: FONT_BODY, color: MUTED, border: "none", background: "none", cursor: "pointer" }}
+                            >
+                              Descartar
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
           <span style={{ fontFamily: FONT_BODY, fontSize: 11, color: ACCENT, textTransform: "uppercase", letterSpacing: "0.08em" }}>{isAdmin ? "Organizadora" : "Invitado · solo lectura"}</span>
           <button onClick={() => setRole(null)} style={{ fontFamily: FONT_BODY, fontSize: 12, color: PAPER, opacity: 0.7 }}>Salir</button>
         </div>
@@ -282,44 +405,6 @@ export default function App() {
       </nav>
 
       <main className={view === "calendario" ? "max-w-5xl mx-auto px-5 py-6" : "max-w-3xl mx-auto px-5 py-6"}>
-        {isAdmin && alertas.length > 0 && (
-          <div className="no-print flex flex-col gap-2 mb-5">
-            <div className="flex justify-end">
-              <button
-                onClick={() => setAlertasOcultas(prev => [...prev, ...alertas.map(a => a.id)])}
-                className="text-xs font-medium"
-                style={{ fontFamily: FONT_BODY, color: MUTED, textDecoration: "underline", background: "none", border: "none", cursor: "pointer" }}
-              >
-                Borrar todas ({alertas.length})
-              </button>
-            </div>
-            {alertas.map(a => (
-              <div key={a.id} className="p-3 rounded flex items-start justify-between gap-3"
-                style={{ background: a.urgente ? PENDIENTE_BG : PARCIAL_BG, border: `1px solid ${a.urgente ? PENDIENTE : PARCIAL}` }}>
-                <button
-                  onClick={() => { setSelectedEvent(a.ev); setView("ficha"); }}
-                  className="text-left flex-1"
-                  style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK, background: "none", border: "none", cursor: "pointer" }}
-                >
-                  {a.texto}
-                </button>
-                <div className="flex items-center gap-2">
-                  {a.id.startsWith("pago-") && (
-                    <button
-                      onClick={() => setEvents(prev => prev.map(e => e.id === a.ev.id ? { ...e, estadoPago: "total" } : e))}
-                      className="text-xs px-2 py-1 rounded"
-                      style={{ fontFamily: FONT_BODY, color: INK, border: `1px solid ${LINE}`, background: CARD, whiteSpace: "nowrap" }}
-                    >
-                      Marcar pagado
-                    </button>
-                  )}
-                  <button onClick={() => setAlertasOcultas(prev => [...prev, a.id])} style={{ color: MUTED, fontSize: 16, lineHeight: 1, fontFamily: FONT_BODY }}>×</button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
         {view === "calendario" && (
           <MonthView year={year} month={month} events={events}
             onPrev={() => { if (month === 0) { setMonth(11); setYear(y => y - 1); } else setMonth(m => m - 1); }}

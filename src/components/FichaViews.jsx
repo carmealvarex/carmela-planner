@@ -5,6 +5,19 @@ import { checklistTexto, textoJefeAreas, waLink } from "../utils/texto.js";
 import { totalItemsEvento } from "../utils/eventHelpers.js";
 import { PrintHeader, Stamp } from "./common.jsx";
 
+// Convierte el color elegido para el evento (hex, ej "#4FC3F7") en un tono muy suave
+// para usar de fondo de la ficha, sin que tape el texto. Si no hay color asignado,
+// devuelve null y se usa el fondo normal (CARD).
+function fondoPorColorEvento(hex) {
+  if (!hex) return null;
+  const limpio = hex.replace("#", "");
+  if (limpio.length !== 6) return null;
+  const r = parseInt(limpio.slice(0, 2), 16);
+  const g = parseInt(limpio.slice(2, 4), 16);
+  const b = parseInt(limpio.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, 0.16)`;
+}
+
 export function FichaCompleta({ ev, jefeAreas, isAdmin, onEdit, onVaucher, onCronograma, onPlano, onVale, onComanda, tienePlantilla, onBack }) {
   const cronoOrdenado = (ev.cronograma || []).slice().sort((a, b) => (a.hora || "").localeCompare(b.hora || ""));
   const fichaRef = useRef(null);
@@ -46,8 +59,10 @@ export function FichaCompleta({ ev, jefeAreas, isAdmin, onEdit, onVaucher, onCro
     }
   };
 
+  const fondoColor = fondoPorColorEvento(ev.colorEvento);
+
   return (
-    <div className="p-5 rounded" style={{ background: CARD, border: `1px solid ${LINE}` }}>
+    <div className="p-5 rounded" style={{ background: fondoColor || CARD, border: `1px solid ${ev.colorEvento || LINE}` }}>
       <div className="no-print flex gap-2 mb-4">
         <button onClick={onBack} className="px-4 py-2 rounded text-sm font-medium" style={{ border: `1px solid ${LINE}`, color: INK, fontFamily: FONT_BODY }}>‹ Volver al resumen</button>
         <button onClick={descargarPDF} disabled={generandoPDF} className="px-4 py-2 rounded text-sm font-medium" style={{ border: `1px solid ${ACCENT}`, color: ACCENT, fontFamily: FONT_BODY, opacity: generandoPDF ? 0.7 : 1 }}>
@@ -269,19 +284,6 @@ export function FichaCompleta({ ev, jefeAreas, isAdmin, onEdit, onVaucher, onCro
         <p style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK }}><b>Notas para cocina:</b> {ev.comanda?.detalle || "-"}</p>
       </div>
 
-      {isAdmin && (ev.historial || []).length > 0 && (
-        <div className="p-3 rounded mb-4" style={{ background: HILITE_BG, border: `1px solid ${LINE}` }}>
-          <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: MUTED, marginBottom: 8, fontWeight: 600 }}>Historial de cambios (factura / vale)</p>
-          <div className="flex flex-col gap-1.5">
-            {ev.historial.slice().reverse().map(h => (
-              <p key={h.id} style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: INK }}>
-                <span style={{ fontFamily: FONT_MONO, color: MUTED }}>{new Date(h.fecha).toLocaleString("es-AR")}</span> — {h.accion}
-              </p>
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* ---- Cronograma completo (horario a horario) ---- */}
       <div className="p-3 rounded mb-4" style={{ background: HILITE_BG, border: `1px solid ${LINE}` }}>
         <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: MUTED, marginBottom: 8, fontWeight: 600 }}>Cronograma</p>
@@ -299,6 +301,22 @@ export function FichaCompleta({ ev, jefeAreas, isAdmin, onEdit, onVaucher, onCro
       <p style={{ fontFamily: FONT_BODY, fontSize: 14, color: INK, marginBottom: 6 }}><b>Notificar a Jefe de Áreas:</b> {ev.notificarJefeAreas ? "Sí" : "No"}</p>
       <p className="mt-2" style={{ fontFamily: FONT_MONO, fontSize: 10.5, color: MUTED }}>Generado el {new Date().toLocaleDateString("es-AR")}</p>
       </div>
+
+      {/* Historial de cambios: queda registrado y visible en la app, pero fuera del bloque que se
+          imprime o se descarga en PDF (por eso está afuera del contenedor de fichaRef de arriba,
+          y además lleva la clase "no-print" por si alguna vez se imprime la página entera). */}
+      {isAdmin && (ev.historial || []).length > 0 && (
+        <div className="no-print p-3 rounded mb-4 mt-4" style={{ background: HILITE_BG, border: `1px solid ${LINE}` }}>
+          <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: MUTED, marginBottom: 8, fontWeight: 600 }}>Historial de cambios (no sale en la ficha impresa/PDF)</p>
+          <div className="flex flex-col gap-1.5">
+            {ev.historial.slice().reverse().map(h => (
+              <p key={h.id} style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: INK }}>
+                <span style={{ fontFamily: FONT_MONO, color: MUTED }}>{new Date(h.fecha).toLocaleString("es-AR")}</span> — {h.accion}
+              </p>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="no-print flex gap-2 mt-4 flex-wrap">
         {isAdmin && <button onClick={onEdit} className="px-3 py-1.5 rounded text-xs font-medium" style={{ background: INK_SOFT, color: PAPER, fontFamily: FONT_BODY }}>Editar</button>}
@@ -332,8 +350,9 @@ export function FichaCompleta({ ev, jefeAreas, isAdmin, onEdit, onVaucher, onCro
    resto de la información vive en "Ficha completa".
    ============================================================ */
 export function EventoResumen({ ev, isAdmin, onEdit, onFichaCompleta, onVaucher, onCronograma, onPlano, onVale, onComanda, tienePlantilla }) {
+  const fondoColor = fondoPorColorEvento(ev.colorEvento);
   return (
-    <div className="p-5 rounded" style={{ background: CARD, border: `1px solid ${LINE}` }}>
+    <div className="p-5 rounded" style={{ background: fondoColor || CARD, border: `1px solid ${ev.colorEvento || LINE}` }}>
       <div className="flex items-start justify-between mb-2">
         <div>
           {ev.colorEvento && <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: "50%", background: ev.colorEvento, marginRight: 6 }} />}

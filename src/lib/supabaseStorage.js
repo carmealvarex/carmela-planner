@@ -12,6 +12,25 @@ if (!url || !anonKey) {
 export const supabase = createClient(url || "", anonKey || "");
 
 /* ============================================================
+   withTimeout(promesa, ms)
+   Los llamados de Supabase (lecturas, guardados, subidas de archivo) no
+   tienen límite de tiempo propio: si la conexión se cuelga a mitad de
+   camino, la app puede quedar esperando para siempre sin avisar (esto es
+   lo que probablemente pasaba con "Optimizando… hace 2 horas" — una sola
+   subida trabada frenaba todo el resto de la fila). Esta función corta
+   la espera a los "ms" indicados y la convierte en un error normal, así
+   la app puede seguir adelante en vez de quedarse colgada.
+   ============================================================ */
+function withTimeout(promesa, ms, etiqueta) {
+  return Promise.race([
+    Promise.resolve(promesa),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(`Tiempo de espera agotado${etiqueta ? ` (${etiqueta})` : ""} tras ${Math.round(ms / 1000)}s`)), ms)
+    ),
+  ]);
+}
+
+/* ============================================================
    Tabla esperada en Supabase (ver README.md para el SQL):
 
    create table kv_store (
@@ -38,11 +57,15 @@ export const supabase = createClient(url || "", anonKey || "");
    ============================================================ */
 export async function loadShared(key, fallback) {
   try {
-    const { data, error } = await supabase
-      .from("kv_store")
-      .select("value, updated_at")
-      .eq("key", key)
-      .maybeSingle();
+    const { data, error } = await withTimeout(
+      supabase
+        .from("kv_store")
+        .select("value, updated_at")
+        .eq("key", key)
+        .maybeSingle(),
+      15000,
+      `cargar ${key}`
+    );
     if (error) throw error;
     return { value: data ? data.value : fallback, ok: true, updatedAt: data ? data.updated_at : null };
   } catch (e) {
@@ -73,25 +96,53 @@ export async function saveShared(key, value, expectedUpdatedAt) {
   const nuevaMarca = new Date().toISOString();
   try {
     if (expectedUpdatedAt) {
-      const { data, error } = await supabase
-        .from("kv_store")
-        .update({ value, updated_at: nuevaMarca })
-        .eq("key", key)
-        .eq("updated_at", expectedUpdatedAt)
-        .select("updated_at");
+      const { data, error } = await withTimeout(
+        supabase
+          .from("kv_store")
+          .update({ value, updated_at: nuevaMarca })
+          .eq("key", key)
+          .eq("updated_at", expectedUpdatedAt)
+          .select("updated_at"),
+        15000,
+        `guardar ${key}`
+      );
       if (error) throw error;
       if (!data || data.length === 0) {
-        // 0 filas afectadas: o no existía todavía, o (mucho más probable)
-        // alguien la actualizó después de que nosotros la leímos.
-        return { ok: true, conflict: true, updatedAt: expectedUpdatedAt };
+        // 0 filas en la respuesta NO quiere decir necesariamente que hubo un
+        // conflicto real. También pasa si Supabase aplicó el cambio pero no
+        // nos dejó "verlo" de vuelta (permisos de seguridad por fila / RLS
+        // mal configurados) — en ese caso el guardado sí funcionó, y si acá
+        // lo tratáramos como conflicto estaríamos tirando el cambio de la
+        // persona a la basura por error. Para no arriesgarnos, volvemos a
+        // leer la fila aparte antes de decidir qué pasó de verdad.
+        const verificacion = await withTimeout(
+          supabase.from("kv_store").select("value, updated_at").eq("key", key).maybeSingle(),
+          15000,
+          `verificar ${key}`
+        );
+        if (verificacion.error) throw verificacion.error;
+        const filaActual = verificacion.data;
+        if (filaActual && filaActual.updated_at === nuevaMarca) {
+          // Nuestro guardado sí se aplicó (era el caso "fantasma" de arriba).
+          guardarBackup(key, value);
+          return { ok: true, conflict: false, updatedAt: nuevaMarca };
+        }
+        // Acá sí es un conflicto real: la fila tiene una marca distinta a
+        // la que esperábamos y distinta a la que acabamos de escribir, es
+        // decir, alguien más guardó en el medio.
+        return { ok: true, conflict: true, updatedAt: filaActual ? filaActual.updated_at : expectedUpdatedAt };
       }
       guardarBackup(key, value);
       return { ok: true, conflict: false, updatedAt: data[0].updated_at };
     } else {
-      const { data, error } = await supabase
-        .from("kv_store")
-        .upsert({ key, value, updated_at: nuevaMarca })
-        .select("updated_at");
+      const { data, error } = await withTimeout(
+        supabase
+          .from("kv_store")
+          .upsert({ key, value, updated_at: nuevaMarca })
+          .select("updated_at"),
+        15000,
+        `guardar ${key}`
+      );
       if (error) throw error;
       guardarBackup(key, value);
       return { ok: true, conflict: false, updatedAt: data?.[0]?.updated_at || nuevaMarca };
@@ -171,12 +222,16 @@ export function esDataUrl(valor) {
 export async function uploadFile(path, archivo, contentType) {
   try {
     const blob = typeof archivo === "string" ? dataURLtoBlob(archivo) : archivo;
-    const { error } = await supabase.storage
-      .from(BUCKET_ARCHIVOS)
-      .upload(path, blob, {
-        upsert: true,
-        contentType: contentType || blob.type || "application/octet-stream",
-      });
+    const { error } = await withTimeout(
+      supabase.storage
+        .from(BUCKET_ARCHIVOS)
+        .upload(path, blob, {
+          upsert: true,
+          contentType: contentType || blob.type || "application/octet-stream",
+        }),
+      30000,
+      `subir ${path}`
+    );
     if (error) throw error;
     const { data } = supabase.storage.from(BUCKET_ARCHIVOS).getPublicUrl(path);
     return { ok: true, url: data.publicUrl };

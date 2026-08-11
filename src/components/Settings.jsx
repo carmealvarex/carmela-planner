@@ -3,16 +3,41 @@ import { ACCENT, CARD, FONT_BODY, FONT_HEAD, HILITE_BG, INK, INK_SOFT, LINE, MUT
 import { toISO } from "../utils/helpers.js";
 import { Field, inputStyle } from "./common.jsx";
 import { DropZone, ImportICS } from "./ImportPlano.jsx";
+import { useAppAlert } from "./ConfirmDialog.jsx";
+import { uploadFile, esDataUrl, deleteFile } from "../lib/supabaseStorage.js";
 
 export function Settings({ jefeAreas, setJefeAreas, tarifas, setTarifas, floorplans, setFloorplans, events, onImportEvents, onMarkPastAsPaid }) {
+  const alertUser = useAppAlert();
   const [nuevoSalon, setNuevoSalon] = useState("");
   const [tab, setTab] = useState("tarifas");
+  const [subiendoPlano, setSubiendoPlano] = useState(false);
 
-  const subirPlano = (salon, file) => {
+  // Antes esto guardaba la plantilla entera (una imagen) pegada como base64
+  // directo adentro del bloque de "planos", junto con las de todos los demás
+  // salones. Ahora la imagen se sube al Storage de Supabase y en "planos"
+  // solo queda un link corto a esa imagen.
+  const subirPlano = async (salon, file) => {
     if (!salon.trim() || !file) return;
-    const reader = new FileReader();
-    reader.onload = () => setFloorplans(prev => ({ ...prev, [salon.trim()]: String(reader.result) }));
-    reader.readAsDataURL(file);
+    setSubiendoPlano(true);
+    const path = `plantillas/${salon.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${Date.now()}.png`;
+    const res = await uploadFile(path, file, file.type);
+    setSubiendoPlano(false);
+    if (!res.ok) {
+      await alertUser("No se pudo subir el plano (revisá tu conexión). Volvé a intentar.");
+      return;
+    }
+    setFloorplans(prev => ({ ...prev, [salon.trim()]: res.url }));
+  };
+
+  // Al eliminar una plantilla, si estaba en Storage (no es una vieja en base64),
+  // también la borramos ahí para no ir dejando archivos sueltos sin usar.
+  const eliminarPlano = (salon) => {
+    const img = floorplans[salon];
+    if (img && !esDataUrl(img)) {
+      const match = img.match(/plantillas\/[^?]+/);
+      if (match) deleteFile(match[0]);
+    }
+    setFloorplans(prev => { const n = { ...prev }; delete n[salon]; return n; });
   };
 
   const setTarifa = (salon, campo, valor) => setTarifas(prev => ({ ...prev, [salon]: { ...(prev[salon] || {}), [campo]: valor } }));
@@ -85,7 +110,7 @@ export function Settings({ jefeAreas, setJefeAreas, tarifas, setTarifas, floorpl
               <div key={salon} className="flex items-center gap-3 p-2 rounded" style={{ background: HILITE_BG }}>
                 <img src={img} alt={salon} style={{ width: 56, height: 56, objectFit: "cover", borderRadius: 4, border: `1px solid ${LINE}` }} />
                 <span style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK, flex: 1 }}>{salon}</span>
-                <button onClick={() => setFloorplans(prev => { const n = { ...prev }; delete n[salon]; return n; })} style={{ color: PENDIENTE, fontSize: 12, fontFamily: FONT_BODY }}>Eliminar</button>
+                <button onClick={() => eliminarPlano(salon)} style={{ color: PENDIENTE, fontSize: 12, fontFamily: FONT_BODY }}>Eliminar</button>
               </div>
             ))}
           </div>
@@ -99,9 +124,9 @@ export function Settings({ jefeAreas, setJefeAreas, tarifas, setTarifas, floorpl
               <DropZone
                 inputId="input-plano"
                 accept="image/*"
-                label="Elegir imagen del plano"
-                hint={nuevoSalon ? "Arrastrá la imagen acá o tocá el botón" : "Elegí un salón primero"}
-                disabled={!nuevoSalon}
+                label={subiendoPlano ? "Subiendo…" : "Elegir imagen del plano"}
+                hint={!nuevoSalon ? "Elegí un salón primero" : subiendoPlano ? "Subiendo la imagen…" : "Arrastrá la imagen acá o tocá el botón"}
+                disabled={!nuevoSalon || subiendoPlano}
                 onFile={file => subirPlano(nuevoSalon, file)}
               />
             </div>

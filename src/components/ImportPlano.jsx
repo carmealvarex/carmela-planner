@@ -197,6 +197,10 @@ export function PlanoEditor({ salon, nombreEvento, fecha, plantilla, dibujoInici
   const cargarBase = (src) => {
     if (!src) return;
     const img = new Image();
+    // Las plantillas y planos ahora se guardan en Supabase Storage (otro
+    // dominio) en vez de pegadas como base64. Sin esto, el navegador marca
+    // el canvas como "contaminado" y no deja hacer toDataURL() al guardar.
+    if (src.startsWith("http")) img.crossOrigin = "anonymous";
     img.onload = () => {
       const canvas = canvasRef.current;
       canvas.width = img.width;
@@ -300,11 +304,19 @@ export function PlanoEditor({ salon, nombreEvento, fecha, plantilla, dibujoInici
     reader.readAsDataURL(file);
   };
 
-  const guardar = () => {
+  const [subiendo, setSubiendo] = useState(false);
+  const guardar = async () => {
     const dataUrl = canvasRef.current.toDataURL("image/png");
-    onGuardar(dataUrl, notas);
-    setGuardado(true);
-    setTimeout(() => setGuardado(false), 1500);
+    setSubiendo(true);
+    try {
+      await onGuardar(dataUrl, notas);
+      setGuardado(true);
+      setTimeout(() => setGuardado(false), 1500);
+    } catch {
+      // El aviso de error ya lo muestra onGuardar (toast); acá no hace falta duplicarlo.
+    } finally {
+      setSubiendo(false);
+    }
   };
 
   // Descarga el plano actual (base + lo dibujado) como archivo .jpg,
@@ -345,7 +357,11 @@ export function PlanoEditor({ salon, nombreEvento, fecha, plantilla, dibujoInici
       <div className="no-print flex gap-2 mb-3 flex-wrap items-center">
         <button onClick={() => window.print()} className="px-4 py-2 rounded text-sm font-medium" style={{ background: INK_SOFT, color: PAPER, fontFamily: FONT_BODY }}>Imprimir plano</button>
         <button onClick={descargarJPG} className="px-4 py-2 rounded text-sm font-medium" style={{ border: `1px solid ${LINE}`, color: INK, fontFamily: FONT_BODY }}>Descargar en JPG</button>
-        {isAdmin && <button onClick={guardar} className="px-4 py-2 rounded text-sm font-medium" style={{ background: PAGADO, color: PAPER, fontFamily: FONT_BODY }}>{guardado ? "¡Guardado!" : "Guardar dibujo del evento"}</button>}
+        {isAdmin && (
+          <button onClick={guardar} disabled={subiendo} className="px-4 py-2 rounded text-sm font-medium" style={{ background: PAGADO, color: PAPER, fontFamily: FONT_BODY, opacity: subiendo ? 0.6 : 1 }}>
+            {subiendo ? "Subiendo…" : guardado ? "¡Guardado!" : "Guardar dibujo del evento"}
+          </button>
+        )}
         {isAdmin && (
           <button onClick={deshacer} disabled={!puedeDeshacer} className="px-3 py-2 rounded text-xs font-medium" style={{ border: `1px solid ${LINE}`, color: puedeDeshacer ? INK : MUTED, opacity: puedeDeshacer ? 1 : 0.5, fontFamily: FONT_BODY }}>
             ↩ Deshacer

@@ -4,6 +4,7 @@ import { esMultiDia, fechasEvento, fmtFecha, fmtMoney, fmtRangoFecha, uid } from
 import { blankDia, blankEvent, sincronizarDias, totalItemsEvento } from "../utils/eventHelpers.js";
 import { Field, HoraField, Toggle, inputStyle } from "./common.jsx";
 import { useConfirm, useAppAlert } from "./ConfirmDialog.jsx";
+import { uploadFile, esDataUrl, deleteFile } from "../lib/supabaseStorage.js";
 
 export function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
   const confirm = useConfirm();
@@ -123,6 +124,10 @@ export function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
   // parte de la ficha (igual que el resto de los datos), así quedan disponibles siempre,
   // sin depender de que la persona los tenga guardados en otro lado.
   const [subiendoArchivo, setSubiendoArchivo] = useState(false);
+  // Antes esto guardaba el archivo entero (foto, comprobante, etc.) pegado
+  // como base64 directo adentro del evento, lo que hacía que la ficha
+  // pesara cada vez más y la app tardara mucho en abrir. Ahora el archivo
+  // se sube al Storage de Supabase y en el evento solo queda un link corto.
   const agregarArchivo = async (file) => {
     if (!file) return;
     if (file.size > 8 * 1024 * 1024) {
@@ -130,19 +135,23 @@ export function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
       return;
     }
     setSubiendoArchivo(true);
-    const reader = new FileReader();
-    reader.onload = () => {
-      setEv(prev => ({ ...prev, archivosAdjuntos: [...(prev.archivosAdjuntos || []), { id: uid(), nombre: file.name, tipo: file.type, dataUrl: reader.result, fecha: new Date().toISOString() }] }));
-      registrarHistorial(`Adjuntó archivo "${file.name}"`);
+    const id = uid();
+    const res = await uploadFile(`adjuntos/${ev.id}/${id}-${file.name}`, file, file.type);
+    if (!res.ok) {
+      await alertUser("No se pudo subir el archivo (revisá tu conexión). Probá de nuevo.");
       setSubiendoArchivo(false);
-    };
-    reader.onerror = async () => { await alertUser("No se pudo leer el archivo. Probá de nuevo."); setSubiendoArchivo(false); };
-    reader.readAsDataURL(file);
+      return;
+    }
+    setEv(prev => ({ ...prev, archivosAdjuntos: [...(prev.archivosAdjuntos || []), { id, nombre: file.name, tipo: file.type, dataUrl: res.url, fecha: new Date().toISOString() }] }));
+    registrarHistorial(`Adjuntó archivo "${file.name}"`);
+    setSubiendoArchivo(false);
   };
   const quitarArchivo = async (id) => {
     if (!(await confirm("¿Seguro que querés quitar este archivo adjunto?", { danger: true, confirmLabel: "Sí, quitar" }))) return;
     const a = (ev.archivosAdjuntos || []).find(x => x.id === id);
     setEv(prev => ({ ...prev, archivosAdjuntos: (prev.archivosAdjuntos || []).filter(x => x.id !== id) }));
+    // Best-effort: si el archivo estaba en Storage (no es uno viejo en base64), lo borramos también ahí.
+    if (a && a.dataUrl && !esDataUrl(a.dataUrl)) deleteFile(`adjuntos/${ev.id}/${a.id}-${a.nombre}`);
     if (a) registrarHistorial(`Quitó archivo "${a.nombre}"`);
   };
 

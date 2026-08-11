@@ -4,6 +4,7 @@ import { uid } from "../utils/helpers.js";
 import { extractICSFromZip, parseICS } from "../utils/ics.js";
 import { blankEvent } from "../utils/eventHelpers.js";
 import { PrintHeader } from "./common.jsx";
+import { useAppAlert } from "./ConfirmDialog.jsx";
 
 export function DropZone({ onFile, accept, label, hint, disabled, inputId }) {
   const [sobre, setSobre] = useState(false);
@@ -167,6 +168,7 @@ function formatFechaLarga(fechaISO) {
 }
 
 export function PlanoEditor({ salon, nombreEvento, fecha, plantilla, dibujoInicial, notasIniciales, onGuardar, onBack, isAdmin }) {
+  const alertUser = useAppAlert();
   const canvasRef = useRef(null); // lo que se ve: base + trazos ya combinados
   const trazosCanvasRef = useRef(null); // capa invisible: solo lo dibujado en esta sesión (para poder borrar un trazo sin tocar la base)
   const baseImgRef = useRef(null); // la plantilla o el último dibujo guardado, tal cual, intacto
@@ -287,10 +289,10 @@ export function PlanoEditor({ salon, nombreEvento, fecha, plantilla, dibujoInici
   // mano) para usar en vez de dibujar sobre la plantilla. Reemplaza lo que
   // haya en el lienzo por la imagen subida; después se puede seguir
   // dibujando encima si hace falta, y se guarda igual que un dibujo normal.
-  const subirArchivo = (file) => {
+  const subirArchivo = async (file) => {
     if (!file || !isAdmin) return;
     if (!file.type.startsWith("image/")) {
-      window.alert("Por ahora solo se pueden subir imágenes (foto o captura del plano), no otros tipos de archivo.");
+      await alertUser("Por ahora solo se pueden subir imágenes (foto o captura del plano), no otros tipos de archivo.");
       return;
     }
     const reader = new FileReader();

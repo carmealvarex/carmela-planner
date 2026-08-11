@@ -4,21 +4,10 @@ import { esMultiDia, fechasEvento, fmtFechaCorta, fmtMoney, fmtRangoFecha, slugA
 import { checklistTexto, textoJefeAreas, waLink } from "../utils/texto.js";
 import { totalItemsEvento } from "../utils/eventHelpers.js";
 import { PrintHeader, Stamp } from "./common.jsx";
-
-// Convierte el color elegido para el evento (hex, ej "#4FC3F7") en un tono muy suave
-// para usar de fondo de la ficha, sin que tape el texto. Si no hay color asignado,
-// devuelve null y se usa el fondo normal (CARD).
-function fondoPorColorEvento(hex) {
-  if (!hex) return null;
-  const limpio = hex.replace("#", "");
-  if (limpio.length !== 6) return null;
-  const r = parseInt(limpio.slice(0, 2), 16);
-  const g = parseInt(limpio.slice(2, 4), 16);
-  const b = parseInt(limpio.slice(4, 6), 16);
-  return `rgba(${r}, ${g}, ${b}, 0.16)`;
-}
+import { useAppAlert } from "./ConfirmDialog.jsx";
 
 export function FichaCompleta({ ev, jefeAreas, isAdmin, onEdit, onVaucher, onCronograma, onPlano, onVale, onComanda, tienePlantilla, onBack }) {
+  const alertUser = useAppAlert();
   const cronoOrdenado = (ev.cronograma || []).slice().sort((a, b) => (a.hora || "").localeCompare(b.hora || ""));
   const fichaRef = useRef(null);
   const [generandoPDF, setGenerandoPDF] = useState(false);
@@ -47,22 +36,54 @@ export function FichaCompleta({ ev, jefeAreas, isAdmin, onEdit, onVaucher, onCro
       const html2canvas = (await import("html2canvas")).default;
       const { jsPDF } = await import("jspdf");
       const canvas = await html2canvas(fichaRef.current, { scale: 2, backgroundColor: "#ffffff", useCORS: true });
-      const imgData = canvas.toDataURL("image/jpeg", 0.95);
-      const pdf = new jsPDF({ orientation: canvas.width >= canvas.height ? "landscape" : "portrait", unit: "px", format: [canvas.width, canvas.height] });
-      pdf.addImage(imgData, "JPEG", 0, 0, canvas.width, canvas.height);
+
+      // Hoja A4 estándar (no "a medida" del contenido) con margen real, para que
+      // se vea igual que al imprimir en papel. Si el contenido no entra en una sola
+      // hoja, se parte solo en las páginas que hagan falta (2, 3...).
+      const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+      const margenMM = 12;
+      const pageWidthMM = pdf.internal.pageSize.getWidth();
+      const pageHeightMM = pdf.internal.pageSize.getHeight();
+      const anchoUtilMM = pageWidthMM - margenMM * 2;
+      const altoUtilMM = pageHeightMM - margenMM * 2;
+
+      // Píxeles del canvas que corresponden a un milímetro, una vez escalado el
+      // ancho del canvas al ancho útil de la hoja.
+      const pxPorMM = canvas.width / anchoUtilMM;
+      const altoPaginaPx = Math.floor(altoUtilMM * pxPorMM);
+
+      let renderedPx = 0;
+      let primeraPagina = true;
+      while (renderedPx < canvas.height) {
+        const alturaSlicePx = Math.min(altoPaginaPx, canvas.height - renderedPx);
+        const sliceCanvas = document.createElement("canvas");
+        sliceCanvas.width = canvas.width;
+        sliceCanvas.height = alturaSlicePx;
+        const ctx = sliceCanvas.getContext("2d");
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, sliceCanvas.width, sliceCanvas.height);
+        ctx.drawImage(canvas, 0, renderedPx, canvas.width, alturaSlicePx, 0, 0, canvas.width, alturaSlicePx);
+        const sliceData = sliceCanvas.toDataURL("image/jpeg", 0.95);
+        const alturaSliceMM = alturaSlicePx / pxPorMM;
+
+        if (!primeraPagina) pdf.addPage();
+        pdf.addImage(sliceData, "JPEG", margenMM, margenMM, anchoUtilMM, alturaSliceMM);
+
+        renderedPx += alturaSlicePx;
+        primeraPagina = false;
+      }
+
       pdf.save(`${nombreFicha()}.pdf`);
     } catch (err) {
-      alert("No se pudo generar el PDF. Verificá que el paquete 'jspdf' esté instalado (npm install jspdf).");
+      await alertUser("No se pudo generar el PDF. Verificá que el paquete 'jspdf' esté instalado (npm install jspdf).");
       console.error(err);
     } finally {
       setGenerandoPDF(false);
     }
   };
 
-  const fondoColor = fondoPorColorEvento(ev.colorEvento);
-
   return (
-    <div className="p-5 rounded" style={{ background: fondoColor || CARD, border: `1px solid ${ev.colorEvento || LINE}` }}>
+    <div className="p-5 rounded" style={{ background: CARD, border: `1px solid ${LINE}` }}>
       <div className="no-print flex gap-2 mb-4">
         <button onClick={onBack} className="px-4 py-2 rounded text-sm font-medium" style={{ border: `1px solid ${LINE}`, color: INK, fontFamily: FONT_BODY }}>‹ Volver al resumen</button>
         <button onClick={descargarPDF} disabled={generandoPDF} className="px-4 py-2 rounded text-sm font-medium" style={{ border: `1px solid ${ACCENT}`, color: ACCENT, fontFamily: FONT_BODY, opacity: generandoPDF ? 0.7 : 1 }}>
@@ -350,9 +371,8 @@ export function FichaCompleta({ ev, jefeAreas, isAdmin, onEdit, onVaucher, onCro
    resto de la información vive en "Ficha completa".
    ============================================================ */
 export function EventoResumen({ ev, isAdmin, onEdit, onFichaCompleta, onVaucher, onCronograma, onPlano, onVale, onComanda, tienePlantilla }) {
-  const fondoColor = fondoPorColorEvento(ev.colorEvento);
   return (
-    <div className="p-5 rounded" style={{ background: fondoColor || CARD, border: `1px solid ${ev.colorEvento || LINE}` }}>
+    <div className="p-5 rounded" style={{ background: CARD, border: `1px solid ${LINE}` }}>
       <div className="flex items-start justify-between mb-2">
         <div>
           {ev.colorEvento && <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: "50%", background: ev.colorEvento, marginRight: 6 }} />}

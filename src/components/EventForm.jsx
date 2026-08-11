@@ -3,8 +3,11 @@ import { ACCENT, CARD, CATERING_SUGERIDOS, COLORES_EVENTO, CONDICIONES_IVA, CP_B
 import { esMultiDia, fechasEvento, fmtFecha, fmtMoney, fmtRangoFecha, uid } from "../utils/helpers.js";
 import { blankDia, blankEvent, sincronizarDias, totalItemsEvento } from "../utils/eventHelpers.js";
 import { Field, HoraField, Toggle, inputStyle } from "./common.jsx";
+import { useConfirm, useAppAlert } from "./ConfirmDialog.jsx";
 
 export function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
+  const confirm = useConfirm();
+  const alertUser = useAppAlert();
   const [ev, setEv] = useState(() => {
     const base = { ...blankEvent(initial?.fecha), ...(initial || {}) };
     // Migración: fichas viejas tenían un solo contacto y una sola factura sueltos.
@@ -51,8 +54,8 @@ export function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
     }));
     setNuevoTipoCubiertoDia({ tipo: VALE_TIPOS[0], cantidad: "", valorUnitario: "", comentario: "" });
   };
-  const quitarTipoCubiertoDia = (idx, id) => {
-    if (!window.confirm("¿Seguro que querés quitar este ítem del vale de ese día?")) return;
+  const quitarTipoCubiertoDia = async (idx, id) => {
+    if (!(await confirm("¿Seguro que querés quitar este ítem del vale de ese día?", { danger: true, confirmLabel: "Sí, quitar" }))) return;
     setEv(prev => ({
       ...prev,
       dias: prev.dias.map((d, i) => i === idx ? { ...d, valeTipos: (d.valeTipos || []).filter(t => t.id !== id) } : d),
@@ -109,8 +112,8 @@ export function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
     registrarHistorial(`Agregó factura ${nuevaFactura.numero || "(sin número)"}${nuevaFactura.monto ? ` por $ ${fmtMoney(Number(nuevaFactura.monto))}` : ""}`);
     setNuevaFactura({ numero: "", monto: "", fecha: "", link: "", retenciones: "no" });
   };
-  const quitarFactura = (id) => {
-    if (!window.confirm("¿Seguro que querés quitar esta factura?")) return;
+  const quitarFactura = async (id) => {
+    if (!(await confirm("¿Seguro que querés quitar esta factura?", { danger: true, confirmLabel: "Sí, quitar" }))) return;
     const f = (ev.facturas || []).find(x => x.id === id);
     setEv(prev => ({ ...prev, facturas: prev.facturas.filter(f => f.id !== id) }));
     if (f) registrarHistorial(`Quitó factura ${f.numero || "(sin número)"}${f.monto ? ` por $ ${fmtMoney(Number(f.monto))}` : ""}`);
@@ -120,10 +123,10 @@ export function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
   // parte de la ficha (igual que el resto de los datos), así quedan disponibles siempre,
   // sin depender de que la persona los tenga guardados en otro lado.
   const [subiendoArchivo, setSubiendoArchivo] = useState(false);
-  const agregarArchivo = (file) => {
+  const agregarArchivo = async (file) => {
     if (!file) return;
     if (file.size > 8 * 1024 * 1024) {
-      window.alert("El archivo pesa más de 8 MB. Achicalo (por ejemplo, sacando la foto con menos resolución) y volvé a intentar.");
+      await alertUser("El archivo pesa más de 8 MB. Achicalo (por ejemplo, sacando la foto con menos resolución) y volvé a intentar.");
       return;
     }
     setSubiendoArchivo(true);
@@ -133,11 +136,11 @@ export function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
       registrarHistorial(`Adjuntó archivo "${file.name}"`);
       setSubiendoArchivo(false);
     };
-    reader.onerror = () => { window.alert("No se pudo leer el archivo. Probá de nuevo."); setSubiendoArchivo(false); };
+    reader.onerror = async () => { await alertUser("No se pudo leer el archivo. Probá de nuevo."); setSubiendoArchivo(false); };
     reader.readAsDataURL(file);
   };
-  const quitarArchivo = (id) => {
-    if (!window.confirm("¿Seguro que querés quitar este archivo adjunto?")) return;
+  const quitarArchivo = async (id) => {
+    if (!(await confirm("¿Seguro que querés quitar este archivo adjunto?", { danger: true, confirmLabel: "Sí, quitar" }))) return;
     const a = (ev.archivosAdjuntos || []).find(x => x.id === id);
     setEv(prev => ({ ...prev, archivosAdjuntos: (prev.archivosAdjuntos || []).filter(x => x.id !== id) }));
     if (a) registrarHistorial(`Quitó archivo "${a.nombre}"`);
@@ -165,8 +168,8 @@ export function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
     registrarHistorial(`Agregó al vale: ${nuevoTipoCubierto.cantidad} × ${nuevoTipoCubierto.tipo} a $ ${fmtMoney(Number(nuevoTipoCubierto.valorUnitario))} c/u${nuevoTipoCubierto.comentario ? ` (${nuevoTipoCubierto.comentario})` : ""}`);
     setNuevoTipoCubierto({ tipo: VALE_TIPOS[0], cantidad: "", valorUnitario: "", comentario: "" });
   };
-  const quitarTipoCubierto = (id) => {
-    if (!window.confirm("¿Seguro que querés quitar este ítem del vale?")) return;
+  const quitarTipoCubierto = async (id) => {
+    if (!(await confirm("¿Seguro que querés quitar este ítem del vale?", { danger: true, confirmLabel: "Sí, quitar" }))) return;
     const t = (ev.vale.tipos || []).find(x => x.id === id);
     setVale("tipos", (ev.vale.tipos || []).filter(t => t.id !== id));
     if (t) registrarHistorial(`Quitó del vale: ${t.cantidad} × ${t.tipo} a $ ${fmtMoney(Number(t.valorUnitario))} c/u`);
@@ -193,8 +196,8 @@ export function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
     setEv(prev => ({ ...prev, cronograma: [...(prev.cronograma || []), { id: uid(), hora: nuevaHora, detalle: nuevoDetalle.trim() }] }));
     setNuevaHora(""); setNuevoDetalle("");
   };
-  const quitarCronograma = (id) => {
-    if (!window.confirm("¿Seguro que querés quitar este horario del cronograma?")) return;
+  const quitarCronograma = async (id) => {
+    if (!(await confirm("¿Seguro que querés quitar este horario del cronograma?", { danger: true, confirmLabel: "Sí, quitar" }))) return;
     setEv(prev => ({ ...prev, cronograma: prev.cronograma.filter(c => c.id !== id) }));
   };
   const cronoOrdenado = (ev.cronograma || []).slice().sort((a, b) => (a.hora || "").localeCompare(b.hora || ""));
@@ -265,161 +268,6 @@ export function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
         <input style={inputStyle} value={ev.nombreEvento || ""} onChange={e => set("nombreEvento", e.target.value)} placeholder="Ej: Cena aniversario Camuzzi Gas" />
       </Field>
 
-
-      <div className="p-4 rounded mb-4" style={{ background: PAPER, border: `1px solid ${LINE}` }}>
-        <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em", color: ACCENT, marginBottom: 12, fontWeight: 700 }}>Datos administrativos</p>
-      <div className="grid grid-cols-3 gap-x-4">
-        <Field label="Empresa que organiza"><input style={inputStyle} value={ev.empresaOrganiza} onChange={e => set("empresaOrganiza", e.target.value)} /></Field>
-        <Field label="Empresa que contrata"><input style={inputStyle} value={ev.empresaContrata} onChange={e => set("empresaContrata", e.target.value)} /></Field>
-        <Field label="Empresa que paga"><input style={inputStyle} value={ev.empresaPaga} onChange={e => set("empresaPaga", e.target.value)} /></Field>
-      </div>
-
-      <Field label="CUIT a facturar">
-        <input style={inputStyle} value={ev.cuit || ""} onChange={e => set("cuit", e.target.value)} placeholder="Ej: 30-12345678-9" />
-      </Field>
-
-      <div className="grid grid-cols-2 gap-x-4">
-        <Field label="Razón social"><input style={inputStyle} value={ev.razonSocial || ""} onChange={e => set("razonSocial", e.target.value)} placeholder="Ej: Camuzzi Gas S.A." /></Field>
-        <Field label="Dirección fiscal"><input style={inputStyle} value={ev.direccionFiscal || ""} onChange={e => set("direccionFiscal", e.target.value)} placeholder="Ej: Av. Siempre Viva 742, CABA" /></Field>
-      </div>
-      <div className="grid grid-cols-2 gap-x-4">
-        <Field label="Tipo de factura">
-          <select style={inputStyle} value={ev.tipoFactura || ""} onChange={e => set("tipoFactura", e.target.value)}>
-            <option value="">Elegir tipo…</option>
-            {TIPOS_FACTURA.map(t => <option key={t} value={t}>{t}</option>)}
-          </select>
-        </Field>
-        <Field label="Condición frente al IVA (opcional)">
-          <select style={inputStyle} value={ev.condicionIva || ""} onChange={e => set("condicionIva", e.target.value)}>
-            <option value="">Sin especificar</option>
-            {CONDICIONES_IVA.map(c => <option key={c} value={c}>{c}</option>)}
-          </select>
-        </Field>
-      </div>
-
-      <Field label="Archivos adjuntos (comprobantes, remitos, capturas...)">
-        <div className="flex flex-col gap-2 mb-2">
-          {(ev.archivosAdjuntos || []).length === 0 && (
-            <p style={{ fontFamily: FONT_BODY, fontSize: 12, color: MUTED }}>Sin archivos adjuntos todavía.</p>
-          )}
-          {(ev.archivosAdjuntos || []).map(a => (
-            <div key={a.id} className="flex items-center gap-2 p-1.5 rounded" style={{ background: CARD, border: `1px solid ${LINE}` }}>
-              {a.tipo?.startsWith("image/") && <img src={a.dataUrl} alt={a.nombre} style={{ width: 34, height: 34, objectFit: "cover", borderRadius: 4, flexShrink: 0 }} />}
-              <a href={a.dataUrl} download={a.nombre} target="_blank" rel="noreferrer" style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.nombre}</a>
-              <button type="button" onClick={() => quitarArchivo(a.id)} style={{ color: PENDIENTE, fontSize: 12, flexShrink: 0 }}>Quitar</button>
-            </div>
-          ))}
-        </div>
-        <label className="inline-block px-3 py-2 rounded text-sm cursor-pointer" style={{ background: INK_SOFT, color: PAPER, fontFamily: FONT_BODY, opacity: subiendoArchivo ? 0.6 : 1 }}>
-          {subiendoArchivo ? "Subiendo…" : "+ Subir archivo"}
-          <input type="file" disabled={subiendoArchivo} onChange={e => { if (e.target.files[0]) agregarArchivo(e.target.files[0]); e.target.value = ""; }} style={{ position: "absolute", width: 1, height: 1, opacity: 0, pointerEvents: "none" }} />
-        </label>
-        <p style={{ fontFamily: FONT_BODY, fontSize: 11, color: MUTED, marginTop: 6 }}>Se guardan junto con la ficha del evento (hasta 8 MB por archivo). Tocá el nombre para verlo o descargarlo.</p>
-      </Field>
-
-      <Field label="Contacto/s (al menos uno, se puede agregar más de uno)">
-        <div className="flex flex-col gap-2 mb-2">
-          {ev.contactos.map((c, idx) => (
-            <div key={idx} className="grid grid-cols-2 gap-2 items-center" style={{ gridTemplateColumns: "1fr 1fr auto" }}>
-              <input style={inputStyle} value={c.nombre} onChange={e => setContacto(idx, "nombre", e.target.value)} placeholder="Nombre del contacto" />
-              <div className="flex gap-2">
-                <input style={inputStyle} value={c.via} onChange={e => setContacto(idx, "via", e.target.value)} placeholder="Email o teléfono" />
-                {ev.contactos.length > 1 && <button type="button" onClick={() => quitarContacto(idx)} style={{ color: PENDIENTE, fontSize: 12 }}>Quitar</button>}
-              </div>
-            </div>
-          ))}
-        </div>
-        <button type="button" onClick={agregarContacto} className="text-xs px-2.5 py-1 rounded" style={{ border: `1px solid ${LINE}`, color: ACCENT, fontFamily: FONT_BODY }}>+ Agregar otro contacto</button>
-      </Field>
-
-      <Field label="Hospedaje">
-        <Toggle checked={!!ev.esHuesped} onChange={v => set("esHuesped", v)} label="El cliente del evento es huésped del hotel" />
-        {ev.esHuesped && (
-          <div className="mt-3 p-2.5 rounded" style={{ background: HILITE_BG, border: `1px solid ${LINE}` }}>
-            <p style={{ fontFamily: FONT_BODY, fontSize: 12, color: MUTED, marginBottom: 8 }}>Nombres de las personas que se hospedan</p>
-            <div className="flex flex-col gap-1.5 mb-2">
-              {(ev.huespedes || []).map((h, idx) => (
-                <div key={idx} className="flex items-center gap-2 p-1.5 rounded" style={{ background: CARD }}>
-                  <span style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK, flex: 1 }}>{h}</span>
-                  <button type="button" onClick={() => quitarHuesped(idx)} style={{ color: PENDIENTE, fontSize: 12 }}>Quitar</button>
-                </div>
-              ))}
-              {!(ev.huespedes || []).length && <p style={{ fontFamily: FONT_BODY, fontSize: 12, color: MUTED }}>Sin huéspedes cargados todavía.</p>}
-            </div>
-            <div className="flex gap-2">
-              <input style={inputStyle} value={nuevoHuesped} onChange={e => setNuevoHuesped(e.target.value)} placeholder="Nombre y apellido" />
-              <button type="button" onClick={agregarHuesped} className="px-3 rounded text-sm" style={{ background: INK_SOFT, color: PAPER }}>+</button>
-            </div>
-          </div>
-        )}
-      </Field>
-
-      <div className="p-3 rounded mb-4" style={{ background: HILITE_BG, border: `1px solid ${LINE}` }}>
-        <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: MUTED, marginBottom: 10 }}>Cotización del evento (tabla del voucher)</p>
-        <table className="w-full mb-3" style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: INK, borderCollapse: "collapse" }}>
-          <thead>
-            <tr style={{ borderBottom: `1px solid ${LINE}` }}>
-              <th className="text-left py-1">Detalle</th>
-              <th className="text-right py-1">Cant.</th>
-              <th className="text-right py-1">Valor uni.</th>
-              <th className="text-right py-1">Valor total</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {totalItemsEvento(evParaTotal, { principal: valorSalonAplicar, adicional: valorSalonAdicionalAplicar }).filas.filter(f => f.auto).map(f => (
-              <tr key={f.id} style={{ borderBottom: `1px solid ${LINE}`, opacity: 0.85 }}>
-                <td className="py-1">{f.detalle} — automático</td>
-                <td className="text-right py-1">{f.cantidad}</td>
-                <td className="text-right py-1">$ {fmtMoney(Number(f.valorUnitario))}</td>
-                <td className="text-right py-1">$ {fmtMoney(Number(f.cantidad) * Number(f.valorUnitario))}</td>
-                <td></td>
-              </tr>
-            ))}
-            {(ev.itemsPresupuesto || []).map(it => (
-              <tr key={it.id} style={{ borderBottom: `1px solid ${LINE}` }}>
-                <td className="py-1">{it.detalle}</td>
-                <td className="text-right py-1">{it.cantidad}</td>
-                <td className="text-right py-1">$ {fmtMoney(Number(it.valorUnitario))}</td>
-                <td className="text-right py-1">$ {fmtMoney((Number(it.cantidad) * Number(it.valorUnitario)))}</td>
-                <td className="text-right py-1"><button type="button" onClick={() => quitarItem(it.id)} style={{ color: PENDIENTE, fontSize: 11 }}>Quitar</button></td>
-              </tr>
-            ))}
-            <tr>
-              <td className="py-1 font-semibold" colSpan={3}>TOTAL (con IVA incluido)</td>
-              <td className="text-right py-1 font-semibold">$ {fmtMoney(totalItemsEvento(evParaTotal, { principal: valorSalonAplicar, adicional: valorSalonAdicionalAplicar }).totalConIva)}</td>
-              <td></td>
-            </tr>
-          </tbody>
-        </table>
-        <p style={{ fontFamily: FONT_BODY, fontSize: 11, color: MUTED, marginBottom: 10 }}>El salón se suma solo (con el valor congelado de la tarifa aplicada) y la comida cargada abajo en el "Vale" también se suma sola acá — no hace falta cargarla dos veces. Usá el campo de "otros ítems" solo para cosas que NO estén en el Vale (ej: técnica, decoración, servicios extra).</p>
-        <div className="grid grid-cols-4 gap-2 items-end">
-          <Field label="Detalle (otro ítem, NO comida del Vale)"><input style={inputStyle} value={nuevoItem.detalle} onChange={e => setNuevoItem(p => ({ ...p, detalle: e.target.value }))} placeholder="Ej: Técnica extra, decoración" /></Field>
-          <Field label="Cantidad"><input type="number" style={inputStyle} value={nuevoItem.cantidad} onChange={e => setNuevoItem(p => ({ ...p, cantidad: e.target.value }))} placeholder="Ej: 60" /></Field>
-          <Field label="Valor unitario"><input type="number" style={inputStyle} value={nuevoItem.valorUnitario} onChange={e => setNuevoItem(p => ({ ...p, valorUnitario: e.target.value }))} placeholder="Ej: 20000" /></Field>
-          <button type="button" onClick={agregarItem} className="px-3 py-2 rounded text-sm mb-4" style={{ background: INK_SOFT, color: PAPER }}>+ Agregar ítem</button>
-        </div>
-      </div>
-
-      <div className="p-3 rounded mb-4" style={{ background: INK_SOFT, border: `2px solid ${ACCENT}` }}>
-        <p style={{ fontFamily: FONT_BODY, fontSize: 12.5, textTransform: "uppercase", letterSpacing: "0.06em", color: PAPER, marginBottom: 10, fontWeight: 700 }}>Forma de pago (podés marcar más de una)</p>
-        <div className="flex flex-wrap gap-2 mb-2">
-          {FORMAS_PAGO.map(item => (
-            <button type="button" key={item} onClick={() => toggleFormaPago(item)}
-              className="text-xs px-2.5 py-1 rounded-full"
-              style={{ textTransform: "uppercase", fontWeight: 600, letterSpacing: "0.02em", border: `1px solid ${(ev.formasPago || []).includes(item) ? ACCENT : PAPER}`, background: (ev.formasPago || []).includes(item) ? ACCENT : "transparent", color: (ev.formasPago || []).includes(item) ? "#fff" : PAPER, fontFamily: FONT_BODY }}>
-              {item}
-            </button>
-          ))}
-        </div>
-        {(ev.formasPago || []).includes("Cargar tarifa a la habitación") && (
-          <Field label="N° de habitación"><input style={inputStyle} value={ev.numeroHabitacion || ""} onChange={e => set("numeroHabitacion", e.target.value)} placeholder="Ej: 214" /></Field>
-        )}
-        {(ev.formasPago || []).includes("Abrir sala con seña $") && (
-          <Field label="Monto de apertura de sala $"><input type="number" style={inputStyle} value={ev.montoAperturaSala || ""} onChange={e => set("montoAperturaSala", e.target.value)} placeholder="Ej: 100000" /></Field>
-        )}
-      </div>
-      </div>
 
       <div className="grid grid-cols-2 gap-x-4">
         <Field label="Fecha"><input type="date" style={{ ...inputStyle, colorScheme: "light" }} value={ev.fecha} onChange={e => set("fecha", e.target.value)} /></Field>
@@ -648,6 +496,162 @@ export function EventForm({ initial, tarifas, onSave, onCancel, onDelete }) {
           </Field>
         </>
       )}
+
+      <div className="p-4 rounded mb-4" style={{ background: PAPER, border: `1px solid ${LINE}` }}>
+        <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em", color: ACCENT, marginBottom: 12, fontWeight: 700 }}>Datos administrativos</p>
+      <div className="grid grid-cols-3 gap-x-4">
+        <Field label="Empresa que organiza"><input style={inputStyle} value={ev.empresaOrganiza} onChange={e => set("empresaOrganiza", e.target.value)} /></Field>
+        <Field label="Empresa que contrata"><input style={inputStyle} value={ev.empresaContrata} onChange={e => set("empresaContrata", e.target.value)} /></Field>
+        <Field label="Empresa que paga"><input style={inputStyle} value={ev.empresaPaga} onChange={e => set("empresaPaga", e.target.value)} /></Field>
+      </div>
+
+      <Field label="CUIT a facturar">
+        <input style={inputStyle} value={ev.cuit || ""} onChange={e => set("cuit", e.target.value)} placeholder="Ej: 30-12345678-9" />
+      </Field>
+
+      <div className="grid grid-cols-2 gap-x-4">
+        <Field label="Razón social"><input style={inputStyle} value={ev.razonSocial || ""} onChange={e => set("razonSocial", e.target.value)} placeholder="Ej: Camuzzi Gas S.A." /></Field>
+        <Field label="Dirección fiscal"><input style={inputStyle} value={ev.direccionFiscal || ""} onChange={e => set("direccionFiscal", e.target.value)} placeholder="Ej: Av. Siempre Viva 742, CABA" /></Field>
+      </div>
+      <div className="grid grid-cols-2 gap-x-4">
+        <Field label="Tipo de factura">
+          <select style={inputStyle} value={ev.tipoFactura || ""} onChange={e => set("tipoFactura", e.target.value)}>
+            <option value="">Elegir tipo…</option>
+            {TIPOS_FACTURA.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+        </Field>
+        <Field label="Condición frente al IVA (opcional)">
+          <select style={inputStyle} value={ev.condicionIva || ""} onChange={e => set("condicionIva", e.target.value)}>
+            <option value="">Sin especificar</option>
+            {CONDICIONES_IVA.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </Field>
+      </div>
+
+      <Field label="Archivos adjuntos (comprobantes, remitos, capturas...)">
+        <div className="flex flex-col gap-2 mb-2">
+          {(ev.archivosAdjuntos || []).length === 0 && (
+            <p style={{ fontFamily: FONT_BODY, fontSize: 12, color: MUTED }}>Sin archivos adjuntos todavía.</p>
+          )}
+          {(ev.archivosAdjuntos || []).map(a => (
+            <div key={a.id} className="flex items-center gap-2 p-1.5 rounded" style={{ background: CARD, border: `1px solid ${LINE}` }}>
+              {a.tipo?.startsWith("image/") && <img src={a.dataUrl} alt={a.nombre} style={{ width: 34, height: 34, objectFit: "cover", borderRadius: 4, flexShrink: 0 }} />}
+              <a href={a.dataUrl} download={a.nombre} target="_blank" rel="noreferrer" style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.nombre}</a>
+              <button type="button" onClick={() => quitarArchivo(a.id)} style={{ color: PENDIENTE, fontSize: 12, flexShrink: 0 }}>Quitar</button>
+            </div>
+          ))}
+        </div>
+        <label className="inline-block px-3 py-2 rounded text-sm cursor-pointer" style={{ background: INK_SOFT, color: PAPER, fontFamily: FONT_BODY, opacity: subiendoArchivo ? 0.6 : 1 }}>
+          {subiendoArchivo ? "Subiendo…" : "+ Subir archivo"}
+          <input type="file" disabled={subiendoArchivo} onChange={e => { if (e.target.files[0]) agregarArchivo(e.target.files[0]); e.target.value = ""; }} style={{ position: "absolute", width: 1, height: 1, opacity: 0, pointerEvents: "none" }} />
+        </label>
+        <p style={{ fontFamily: FONT_BODY, fontSize: 11, color: MUTED, marginTop: 6 }}>Se guardan junto con la ficha del evento (hasta 8 MB por archivo). Tocá el nombre para verlo o descargarlo.</p>
+      </Field>
+
+      <Field label="Contacto/s (al menos uno, se puede agregar más de uno)">
+        <div className="flex flex-col gap-2 mb-2">
+          {ev.contactos.map((c, idx) => (
+            <div key={idx} className="grid grid-cols-2 gap-2 items-center" style={{ gridTemplateColumns: "1fr 1fr auto" }}>
+              <input style={inputStyle} value={c.nombre} onChange={e => setContacto(idx, "nombre", e.target.value)} placeholder="Nombre del contacto" />
+              <div className="flex gap-2">
+                <input style={inputStyle} value={c.via} onChange={e => setContacto(idx, "via", e.target.value)} placeholder="Email o teléfono" />
+                {ev.contactos.length > 1 && <button type="button" onClick={() => quitarContacto(idx)} style={{ color: PENDIENTE, fontSize: 12 }}>Quitar</button>}
+              </div>
+            </div>
+          ))}
+        </div>
+        <button type="button" onClick={agregarContacto} className="text-xs px-2.5 py-1 rounded" style={{ border: `1px solid ${LINE}`, color: ACCENT, fontFamily: FONT_BODY }}>+ Agregar otro contacto</button>
+      </Field>
+
+      <Field label="Hospedaje">
+        <Toggle checked={!!ev.esHuesped} onChange={v => set("esHuesped", v)} label="El cliente del evento es huésped del hotel" />
+        {ev.esHuesped && (
+          <div className="mt-3 p-2.5 rounded" style={{ background: HILITE_BG, border: `1px solid ${LINE}` }}>
+            <p style={{ fontFamily: FONT_BODY, fontSize: 12, color: MUTED, marginBottom: 8 }}>Nombres de las personas que se hospedan</p>
+            <div className="flex flex-col gap-1.5 mb-2">
+              {(ev.huespedes || []).map((h, idx) => (
+                <div key={idx} className="flex items-center gap-2 p-1.5 rounded" style={{ background: CARD }}>
+                  <span style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK, flex: 1 }}>{h}</span>
+                  <button type="button" onClick={() => quitarHuesped(idx)} style={{ color: PENDIENTE, fontSize: 12 }}>Quitar</button>
+                </div>
+              ))}
+              {!(ev.huespedes || []).length && <p style={{ fontFamily: FONT_BODY, fontSize: 12, color: MUTED }}>Sin huéspedes cargados todavía.</p>}
+            </div>
+            <div className="flex gap-2">
+              <input style={inputStyle} value={nuevoHuesped} onChange={e => setNuevoHuesped(e.target.value)} placeholder="Nombre y apellido" />
+              <button type="button" onClick={agregarHuesped} className="px-3 rounded text-sm" style={{ background: INK_SOFT, color: PAPER }}>+</button>
+            </div>
+          </div>
+        )}
+      </Field>
+
+      <div className="p-3 rounded mb-4" style={{ background: HILITE_BG, border: `1px solid ${LINE}` }}>
+        <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: MUTED, marginBottom: 10 }}>Cotización del evento (tabla del voucher)</p>
+        <table className="w-full mb-3" style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: INK, borderCollapse: "collapse" }}>
+          <thead>
+            <tr style={{ borderBottom: `1px solid ${LINE}` }}>
+              <th className="text-left py-1">Detalle</th>
+              <th className="text-right py-1">Cant.</th>
+              <th className="text-right py-1">Valor uni.</th>
+              <th className="text-right py-1">Valor total</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {totalItemsEvento(evParaTotal, { principal: valorSalonAplicar, adicional: valorSalonAdicionalAplicar }).filas.filter(f => f.auto).map(f => (
+              <tr key={f.id} style={{ borderBottom: `1px solid ${LINE}`, opacity: 0.85 }}>
+                <td className="py-1">{f.detalle} — automático</td>
+                <td className="text-right py-1">{f.cantidad}</td>
+                <td className="text-right py-1">$ {fmtMoney(Number(f.valorUnitario))}</td>
+                <td className="text-right py-1">$ {fmtMoney(Number(f.cantidad) * Number(f.valorUnitario))}</td>
+                <td></td>
+              </tr>
+            ))}
+            {(ev.itemsPresupuesto || []).map(it => (
+              <tr key={it.id} style={{ borderBottom: `1px solid ${LINE}` }}>
+                <td className="py-1">{it.detalle}</td>
+                <td className="text-right py-1">{it.cantidad}</td>
+                <td className="text-right py-1">$ {fmtMoney(Number(it.valorUnitario))}</td>
+                <td className="text-right py-1">$ {fmtMoney((Number(it.cantidad) * Number(it.valorUnitario)))}</td>
+                <td className="text-right py-1"><button type="button" onClick={() => quitarItem(it.id)} style={{ color: PENDIENTE, fontSize: 11 }}>Quitar</button></td>
+              </tr>
+            ))}
+            <tr>
+              <td className="py-1 font-semibold" colSpan={3}>TOTAL (con IVA incluido)</td>
+              <td className="text-right py-1 font-semibold">$ {fmtMoney(totalItemsEvento(evParaTotal, { principal: valorSalonAplicar, adicional: valorSalonAdicionalAplicar }).totalConIva)}</td>
+              <td></td>
+            </tr>
+          </tbody>
+        </table>
+        <p style={{ fontFamily: FONT_BODY, fontSize: 11, color: MUTED, marginBottom: 10 }}>El salón se suma solo (con el valor congelado de la tarifa aplicada) y la comida cargada abajo en el "Vale" también se suma sola acá — no hace falta cargarla dos veces. Usá el campo de "otros ítems" solo para cosas que NO estén en el Vale (ej: técnica, decoración, servicios extra).</p>
+        <div className="grid grid-cols-4 gap-2 items-end">
+          <Field label="Detalle (otro ítem, NO comida del Vale)"><input style={inputStyle} value={nuevoItem.detalle} onChange={e => setNuevoItem(p => ({ ...p, detalle: e.target.value }))} placeholder="Ej: Técnica extra, decoración" /></Field>
+          <Field label="Cantidad"><input type="number" style={inputStyle} value={nuevoItem.cantidad} onChange={e => setNuevoItem(p => ({ ...p, cantidad: e.target.value }))} placeholder="Ej: 60" /></Field>
+          <Field label="Valor unitario"><input type="number" style={inputStyle} value={nuevoItem.valorUnitario} onChange={e => setNuevoItem(p => ({ ...p, valorUnitario: e.target.value }))} placeholder="Ej: 20000" /></Field>
+          <button type="button" onClick={agregarItem} className="px-3 py-2 rounded text-sm mb-4" style={{ background: INK_SOFT, color: PAPER }}>+ Agregar ítem</button>
+        </div>
+      </div>
+
+      <div className="p-3 rounded mb-4" style={{ background: INK_SOFT, border: `2px solid ${ACCENT}` }}>
+        <p style={{ fontFamily: FONT_BODY, fontSize: 12.5, textTransform: "uppercase", letterSpacing: "0.06em", color: PAPER, marginBottom: 10, fontWeight: 700 }}>Forma de pago (podés marcar más de una)</p>
+        <div className="flex flex-wrap gap-2 mb-2">
+          {FORMAS_PAGO.map(item => (
+            <button type="button" key={item} onClick={() => toggleFormaPago(item)}
+              className="text-xs px-2.5 py-1 rounded-full"
+              style={{ textTransform: "uppercase", fontWeight: 600, letterSpacing: "0.02em", border: `1px solid ${(ev.formasPago || []).includes(item) ? ACCENT : PAPER}`, background: (ev.formasPago || []).includes(item) ? ACCENT : "transparent", color: (ev.formasPago || []).includes(item) ? "#fff" : PAPER, fontFamily: FONT_BODY }}>
+              {item}
+            </button>
+          ))}
+        </div>
+        {(ev.formasPago || []).includes("Cargar tarifa a la habitación") && (
+          <Field label="N° de habitación"><input style={inputStyle} value={ev.numeroHabitacion || ""} onChange={e => set("numeroHabitacion", e.target.value)} placeholder="Ej: 214" /></Field>
+        )}
+        {(ev.formasPago || []).includes("Abrir sala con seña $") && (
+          <Field label="Monto de apertura de sala $"><input type="number" style={inputStyle} value={ev.montoAperturaSala || ""} onChange={e => set("montoAperturaSala", e.target.value)} placeholder="Ej: 100000" /></Field>
+        )}
+      </div>
+      </div>
+
 
 
 

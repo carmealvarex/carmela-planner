@@ -122,6 +122,83 @@ async function guardarBackup(key, value) {
 }
 
 /* ============================================================
+   ARCHIVOS GRANDES (fotos, planos dibujados, adjuntos)
+
+   Antes, las fotos y planos se guardaban pegados directo adentro del
+   evento (como texto base64), lo que hacía que TODO el bloque de
+   eventos pesara cada vez más y la app tardara mucho en abrir (tenía
+   que bajar todas las fotos de todos los eventos antes de mostrar
+   nada). Ahora esas fotos/archivos se suben acá, al espacio de
+   Storage de Supabase, y el evento solo guarda un link corto a la foto.
+
+   Requiere que exista un bucket público llamado "archivos" en tu
+   proyecto de Supabase (Storage → New bucket → marcarlo como Public).
+   ============================================================ */
+const BUCKET_ARCHIVOS = "archivos";
+
+// Convierte un data URL (lo que devuelve canvas.toDataURL() o
+// FileReader.readAsDataURL()) en un Blob, para poder subirlo.
+function dataURLtoBlob(dataUrl) {
+  const [header, base64] = dataUrl.split(",");
+  const mimeMatch = header.match(/data:(.*?);base64/);
+  const mime = mimeMatch ? mimeMatch[1] : "application/octet-stream";
+  const binario = atob(base64);
+  const bytes = new Uint8Array(binario.length);
+  for (let i = 0; i < binario.length; i++) bytes[i] = binario.charCodeAt(i);
+  return new Blob([bytes], { type: mime });
+}
+
+/* ============================================================
+   esDataUrl(valor)
+   Devuelve true si el valor es un archivo pegado a la manera vieja
+   (texto base64 gigante) en vez de un link corto. Sirve para detectar
+   fotos/planos viejos que todavía no se migraron al Storage.
+   ============================================================ */
+export function esDataUrl(valor) {
+  return typeof valor === "string" && valor.startsWith("data:");
+}
+
+/* ============================================================
+   uploadFile(path, archivo, contentType?)
+
+   Sube una foto/archivo al Storage de Supabase. "archivo" puede ser:
+     - un File/Blob (lo que devuelve un <input type="file">), o
+     - un data URL en texto (lo que devuelve canvas.toDataURL()).
+
+   Devuelve { ok, url }. "url" es el link público para guardar en el
+   evento en vez del archivo entero.
+   ============================================================ */
+export async function uploadFile(path, archivo, contentType) {
+  try {
+    const blob = typeof archivo === "string" ? dataURLtoBlob(archivo) : archivo;
+    const { error } = await supabase.storage
+      .from(BUCKET_ARCHIVOS)
+      .upload(path, blob, {
+        upsert: true,
+        contentType: contentType || blob.type || "application/octet-stream",
+      });
+    if (error) throw error;
+    const { data } = supabase.storage.from(BUCKET_ARCHIVOS).getPublicUrl(path);
+    return { ok: true, url: data.publicUrl };
+  } catch (e) {
+    console.error("storage uploadFile error", path, e);
+    return { ok: false, url: null };
+  }
+}
+
+// Borra un archivo del Storage (best-effort: si falla, no rompe nada más).
+export async function deleteFile(path) {
+  try {
+    const { error } = await supabase.storage.from(BUCKET_ARCHIVOS).remove([path]);
+    if (error) throw error;
+    return { ok: true };
+  } catch (e) {
+    console.error("storage deleteFile error", path, e);
+    return { ok: false };
+  }
+}
+
+/* ============================================================
    Utilidad de recuperación manual: trae los últimos backups guardados
    para una key (por ejemplo "eventos"), del más nuevo al más viejo.
    Útil si algún día hace falta volver atrás.

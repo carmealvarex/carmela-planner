@@ -18,12 +18,16 @@ export function Settings({ jefeAreas, setJefeAreas, tarifas, setTarifas, floorpl
   // solo queda un link corto a esa imagen.
   const subirPlano = async (salon, file) => {
     if (!salon.trim() || !file) return;
+    if (file.size > 15 * 1024 * 1024) {
+      await alertUser("Esa imagen pesa más de 15 MB, es probable que la subida falle con conexiones lentas. Si podés, sacá la foto con menos resolución (o recortala) y volvé a intentar.");
+      return;
+    }
     setSubiendoPlano(true);
     const path = `plantillas/${salon.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${Date.now()}.png`;
     const res = await uploadFile(path, file, file.type);
     setSubiendoPlano(false);
     if (!res.ok) {
-      await alertUser("No se pudo subir el plano (revisá tu conexión). Volvé a intentar.");
+      await alertUser("No se pudo subir el plano. Puede ser la conexión (si el wifi es lento, probá con más señal) o que el archivo sea muy pesado. Volvé a intentar.");
       return;
     }
     setFloorplans(prev => ({ ...prev, [salon.trim()]: res.url }));

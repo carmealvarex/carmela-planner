@@ -252,6 +252,7 @@ function AppInner() {
           setEvents(prev => prev.map(e => (e.id === ev.id ? { ...e, ...cambios } : e)));
         }
       }
+      if (!cancelado) showToast(`Listo: se optimizaron ${pendientes.length} archivo(s) ✓`);
     })();
     return () => { cancelado = true; };
   }, [ready]);
@@ -312,7 +313,7 @@ function AppInner() {
           setEvents(fresh.value);
           eventosUpdatedAtRef.current = fresh.updatedAt;
           prevEventsCountRef.current = (fresh.value || []).length;
-          showToast("⚠️ Otra computadora guardó cambios justo antes que vos — se actualizó con esa versión. Si tu último cambio no quedó, volvé a hacerlo.");
+          showToast("⚠️ Se guardó un cambio desde otra compu justo antes que el tuyo. Si tu último cambio no quedó, volvé a hacerlo.");
         }
         return;
       }
@@ -337,7 +338,7 @@ function AppInner() {
         if (fresh.ok) {
           setFloorplans(fresh.value);
           planosUpdatedAtRef.current = fresh.updatedAt;
-          showToast("⚠️ Otra computadora guardó un plano justo antes que vos — se actualizó con esa versión. Si tu plano no quedó, volvé a armarlo y guardarlo.");
+          showToast("⚠️ Se guardó un cambio desde otra compu justo antes que el tuyo. Si tu último cambio no quedó, volvé a hacerlo.");
         }
         return;
       }

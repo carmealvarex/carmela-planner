@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { loadShared, saveShared } from "./lib/supabaseStorage.js";
+import { loadShared, saveShared, supabase } from "./lib/supabaseStorage.js";
+import { ConfirmProvider, useConfirm } from "./components/ConfirmDialog.jsx";
 import { ACCENT, CARD, FONT_BODY, FONT_HEAD, FONT_IMPORT, INK, INK_SOFT, LINE, MUTED, PAPER, PARCIAL, PARCIAL_BG, PENDIENTE, PENDIENTE_BG, formatValeNumero } from "./constants.js";
 import { diasHasta, fromISO, mondayOf, toISO } from "./utils/helpers.js";
 import { blankEvent } from "./utils/eventHelpers.js";
@@ -16,6 +17,15 @@ import { ListaPresupuestos, PresupuestoForm, PresupuestoDocumento } from "./comp
 import { Settings } from "./components/Settings.jsx";
 
 export default function App() {
+  return (
+    <ConfirmProvider>
+      <AppInner />
+    </ConfirmProvider>
+  );
+}
+
+function AppInner() {
+  const confirm = useConfirm();
   const [ready, setReady] = useState(false);
   const [role, setRole] = useState(() => {
     try { return localStorage.getItem("plannerRole") || null; } catch { return null; }
@@ -60,6 +70,12 @@ export default function App() {
   // eventos antes, es señal de un bug (no de que la usuaria borro todo a
   // mano) y frenamos el guardado en vez de pisar los datos reales.
   const prevEventsCountRef = useRef(0);
+  // Guardan la "marca de tiempo" con la que quedó guardado en el servidor lo último
+  // que leímos/guardamos nosotros, para poder detectar si otra computadora guardó
+  // algo en el medio (ver saveShared en lib/supabaseStorage.js) y no pisarlo en
+  // silencio. Son las dos keys que reportaste con pérdida de datos: eventos y planos.
+  const eventosUpdatedAtRef = useRef(null);
+  const planosUpdatedAtRef = useRef(null);
 
   const alertas = useMemo(() => {
     const lista = [];
@@ -138,9 +154,61 @@ export default function App() {
       setProximoVoucher(cfg.value.proximoVoucher || 1); setProximoFicha(cfg.value.proximoFicha || 1); setProximoComanda(cfg.value.proximoComanda || 1);
       setFloorplans(planos.value); setTarifas(tar.value); setAlertasOcultas(ocultas.value); setAlertasPospuestas(pospuestas.value); setPresupuestos(presu.value);
       prevEventsCountRef.current = (ev.value || []).length;
+      eventosUpdatedAtRef.current = ev.updatedAt;
+      planosUpdatedAtRef.current = planos.updatedAt;
       setReady(true);
     })();
   }, []);
+
+  // ============================================================
+  // Sincronización en tiempo real: escucha los cambios que guarda
+  // CUALQUIER computadora conectada a la misma base y los aplica acá,
+  // sin necesidad de recargar la página. Necesita que la tabla
+  // "kv_store" tenga la replicación en tiempo real activada en Supabase
+  // (Database → Replication → kv_store, o el SQL:
+  //   alter publication supabase_realtime add table kv_store;
+  // — ver README.md).
+  // ============================================================
+  useEffect(() => {
+    if (!ready) return;
+    const canal = supabase
+      .channel("kv_store_cambios")
+      .on("postgres_changes", { event: "*", schema: "public", table: "kv_store" }, (payload) => {
+        const fila = payload.new;
+        if (!fila || !fila.key) return;
+        switch (fila.key) {
+          case "eventos":
+            // Si la marca de tiempo es la misma que la nuestra, es el eco de
+            // nuestro propio guardado: no hace falta hacer nada.
+            if (fila.updated_at === eventosUpdatedAtRef.current) return;
+            setEvents(fila.value || []);
+            eventosUpdatedAtRef.current = fila.updated_at;
+            prevEventsCountRef.current = (fila.value || []).length;
+            break;
+          case "planos":
+            if (fila.updated_at === planosUpdatedAtRef.current) return;
+            setFloorplans(fila.value || {});
+            planosUpdatedAtRef.current = fila.updated_at;
+            break;
+          case "tarifas":
+            setTarifas(fila.value || {});
+            break;
+          case "jefeAreas":
+            setJefeAreas(fila.value || { telefono: "" });
+            break;
+          case "presupuestos":
+            setPresupuestos(fila.value || []);
+            break;
+          // "alertasOcultas"/"alertasPospuestas"/"config" son preferencias más
+          // personales de quien está usando cada computadora, así que no
+          // hace falta sincronizarlas en vivo entre todos.
+          default:
+            break;
+        }
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(canal); };
+  }, [ready]);
 
   useEffect(() => {
     if (!ready) return;
@@ -154,16 +222,66 @@ export default function App() {
       return;
     }
     prevEventsCountRef.current = events.length;
-    saveShared("eventos", events);
+
+    // Debounce: si vas tipeando o cambiando varias cosas seguidas, esperamos
+    // a que hagas una pausa de casi 1 segundo antes de guardar, en vez de
+    // mandar un guardado a Supabase por cada letra. Esto también reduce
+    // mucho las demoras al usar la app.
+    const t = setTimeout(async () => {
+      const res = await saveShared("eventos", events, eventosUpdatedAtRef.current);
+      if (!res.ok) {
+        showToast("⚠️ No se pudo guardar (revisá tu conexión). Vas a tener que volver a intentar.");
+        return;
+      }
+      if (res.conflict) {
+        // Otra computadora guardó eventos justo antes que nosotros. En vez de
+        // pisar esos cambios con los nuestros (que es lo que pasaba antes y
+        // te borraba planos y cambios), traemos la versión más nueva del
+        // servidor y avisamos, para que puedas volver a aplicar tu cambio.
+        const fresh = await loadShared("eventos", events);
+        if (fresh.ok) {
+          setEvents(fresh.value);
+          eventosUpdatedAtRef.current = fresh.updatedAt;
+          prevEventsCountRef.current = (fresh.value || []).length;
+          showToast("⚠️ Otra computadora guardó cambios justo antes que vos — se actualizó con esa versión. Si tu último cambio no quedó, volvé a hacerlo.");
+        }
+        return;
+      }
+      eventosUpdatedAtRef.current = res.updatedAt;
+    }, 900);
+    return () => clearTimeout(t);
   }, [events, ready]);
-  useEffect(() => { if (ready) saveShared("jefeAreas", jefeAreas); }, [jefeAreas, ready]);
-  useEffect(() => { if (ready) saveShared("planos", floorplans); }, [floorplans, ready]);
-  useEffect(() => { if (ready) saveShared("tarifas", tarifas); }, [tarifas, ready]);
+  useEffect(() => { if (ready) { const t = setTimeout(() => saveShared("jefeAreas", jefeAreas), 900); return () => clearTimeout(t); } }, [jefeAreas, ready]);
+  useEffect(() => {
+    if (!ready) return;
+    const t = setTimeout(async () => {
+      const res = await saveShared("planos", floorplans, planosUpdatedAtRef.current);
+      if (!res.ok) {
+        showToast("⚠️ No se pudo guardar el plano (revisá tu conexión). Volvé a intentar.");
+        return;
+      }
+      if (res.conflict) {
+        // Este es justo el caso que te borraba planos: alguien guardó un plano
+        // desde otra computadora en el medio. Ahora, en vez de pisarlo, traemos
+        // la versión más nueva y avisamos.
+        const fresh = await loadShared("planos", floorplans);
+        if (fresh.ok) {
+          setFloorplans(fresh.value);
+          planosUpdatedAtRef.current = fresh.updatedAt;
+          showToast("⚠️ Otra computadora guardó un plano justo antes que vos — se actualizó con esa versión. Si tu plano no quedó, volvé a armarlo y guardarlo.");
+        }
+        return;
+      }
+      planosUpdatedAtRef.current = res.updatedAt;
+    }, 900);
+    return () => clearTimeout(t);
+  }, [floorplans, ready]);
+  useEffect(() => { if (ready) { const t = setTimeout(() => saveShared("tarifas", tarifas), 900); return () => clearTimeout(t); } }, [tarifas, ready]);
   // Las notificaciones que la persona ya descartó (tocando la "×") se guardan acá, para que
   // no vuelvan a aparecer cada vez que se abre la app.
-  useEffect(() => { if (ready) saveShared("alertasOcultas", alertasOcultas); }, [alertasOcultas, ready]);
-  useEffect(() => { if (ready) saveShared("alertasPospuestas", alertasPospuestas); }, [alertasPospuestas, ready]);
-  useEffect(() => { if (ready) saveShared("presupuestos", presupuestos); }, [presupuestos, ready]);
+  useEffect(() => { if (ready) { const t = setTimeout(() => saveShared("alertasOcultas", alertasOcultas), 900); return () => clearTimeout(t); } }, [alertasOcultas, ready]);
+  useEffect(() => { if (ready) { const t = setTimeout(() => saveShared("alertasPospuestas", alertasPospuestas), 900); return () => clearTimeout(t); } }, [alertasPospuestas, ready]);
+  useEffect(() => { if (ready) { const t = setTimeout(() => saveShared("presupuestos", presupuestos), 900); return () => clearTimeout(t); } }, [presupuestos, ready]);
 
   const setPinIfEmpty = (p) => { setPin(p); saveShared("config", { pin: p, proximoVale, proximoVoucher, proximoFicha, proximoComanda }); };
 
@@ -207,8 +325,8 @@ export default function App() {
     setSelectedEvent(finalEv); setEditingEvent(null); setNewEventDate(null); setView("ficha");
     showToast("Ficha guardada ✓");
   };
-  const handleDeleteEvent = (id) => {
-    if (!window.confirm("¿Seguro que querés eliminar este evento? Esta acción no se puede deshacer.")) return;
+  const handleDeleteEvent = async (id) => {
+    if (!(await confirm("¿Seguro que querés eliminar este evento? Esta acción no se puede deshacer.", { danger: true, confirmLabel: "Sí, eliminar" }))) return;
     setEvents(prev => prev.filter(e => e.id !== id));
     setSelectedEvent(null); setEditingEvent(null); setView("calendario");
     showToast("Evento eliminado");
@@ -222,19 +340,19 @@ export default function App() {
     setPresupuestoSeleccionado(p); setPresupuestoEditando(null); setView("presupuestoDoc");
     showToast("Presupuesto guardado ✓");
   };
-  const handleDeletePresupuesto = (id) => {
-    if (!window.confirm("¿Seguro que querés eliminar este presupuesto? Esta acción no se puede deshacer.")) return;
+  const handleDeletePresupuesto = async (id) => {
+    if (!(await confirm("¿Seguro que querés eliminar este presupuesto? Esta acción no se puede deshacer.", { danger: true, confirmLabel: "Sí, eliminar" }))) return;
     setPresupuestos(prev => prev.filter(p => p.id !== id));
     showToast("Presupuesto eliminado");
   };
   // Herramienta de Ajustes → Notificaciones: marca de una sola vez todos los eventos que ya
   // pasaron y siguen sin pago total (típicamente eventos viejos importados del calendario que
   // no se van a actualizar a mano). No toca eventos de hoy o futuros.
-  const handleMarkPastAsPaid = () => {
+  const handleMarkPastAsPaid = async () => {
     const hoyISO = toISO(new Date());
     const cantidad = events.filter(e => (e.fechaFin || e.fecha) < hoyISO && e.estadoPago !== "total").length;
     if (cantidad === 0) return;
-    if (!window.confirm(`¿Marcar ${cantidad} evento(s) pasados como "pagado en su totalidad"? Esta acción no se puede deshacer fácilmente.`)) return;
+    if (!(await confirm(`¿Marcar ${cantidad} evento(s) pasados como "pagado en su totalidad"? Esta acción no se puede deshacer fácilmente.`))) return;
     setEvents(prev => prev.map(e => ((e.fechaFin || e.fecha) < hoyISO && e.estadoPago !== "total") ? { ...e, estadoPago: "total" } : e));
     showToast(`${cantidad} evento(s) marcados como pagados ✓`);
   };

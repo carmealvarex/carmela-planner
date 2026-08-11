@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { loadShared, saveShared, supabase } from "./lib/supabaseStorage.js";
+import { loadShared, saveShared, supabase, uploadFile, esDataUrl } from "./lib/supabaseStorage.js";
 import { ConfirmProvider, useConfirm } from "./components/ConfirmDialog.jsx";
 import { ACCENT, CARD, FONT_BODY, FONT_HEAD, FONT_IMPORT, INK, INK_SOFT, LINE, MUTED, PAPER, PARCIAL, PARCIAL_BG, PENDIENTE, PENDIENTE_BG, formatValeNumero } from "./constants.js";
 import { diasHasta, fromISO, mondayOf, toISO } from "./utils/helpers.js";
@@ -210,6 +210,75 @@ function AppInner() {
     return () => { supabase.removeChannel(canal); };
   }, [ready]);
 
+  // ============================================================
+  // Migración en segundo plano: los eventos que ya tenían fotos o planos
+  // "pegados" adentro a la manera vieja (base64, todo junto en el mismo
+  // bloque) se van subiendo solos al Storage la primera vez que se abre
+  // la app, uno por uno y sin bloquear nada. Esto es lo que hace que,
+  // con el tiempo, la app vuelva a abrir rápido aunque ya tengas eventos
+  // viejos con fotos cargadas. Corre una sola vez, al arrancar.
+  // ============================================================
+  const migracionCorridaRef = useRef(false);
+  useEffect(() => {
+    if (!ready || migracionCorridaRef.current) return;
+    migracionCorridaRef.current = true;
+    let cancelado = false;
+    (async () => {
+      const pendientes = events.filter(e =>
+        esDataUrl(e.planoDibujo) || (e.archivosAdjuntos || []).some(a => esDataUrl(a.dataUrl))
+      );
+      if (pendientes.length === 0) return;
+      showToast(`Optimizando ${pendientes.length} archivo(s) viejos en segundo plano, para que la app abra más rápido…`);
+      for (const ev of pendientes) {
+        if (cancelado) return;
+        const cambios = {};
+        if (esDataUrl(ev.planoDibujo)) {
+          const res = await uploadFile(`planos/${ev.id}-migrado-${Date.now()}.png`, ev.planoDibujo);
+          if (res.ok) cambios.planoDibujo = res.url;
+        }
+        if ((ev.archivosAdjuntos || []).some(a => esDataUrl(a.dataUrl))) {
+          const nuevos = [];
+          for (const a of ev.archivosAdjuntos) {
+            if (esDataUrl(a.dataUrl)) {
+              const res = await uploadFile(`adjuntos/${ev.id}/${a.id}-${a.nombre}`, a.dataUrl, a.tipo);
+              nuevos.push(res.ok ? { ...a, dataUrl: res.url } : a);
+            } else {
+              nuevos.push(a);
+            }
+          }
+          cambios.archivosAdjuntos = nuevos;
+        }
+        if (!cancelado && Object.keys(cambios).length > 0) {
+          setEvents(prev => prev.map(e => (e.id === ev.id ? { ...e, ...cambios } : e)));
+        }
+      }
+    })();
+    return () => { cancelado = true; };
+  }, [ready]);
+
+  // Misma migración que arriba, pero para las plantillas de plano por salón
+  // (las que se suben desde Ajustes → Planos de salones), que también podían
+  // quedar pegadas como base64 en el bloque de "planos".
+  const migracionPlanosRef = useRef(false);
+  useEffect(() => {
+    if (!ready || migracionPlanosRef.current) return;
+    migracionPlanosRef.current = true;
+    let cancelado = false;
+    (async () => {
+      const entradas = Object.entries(floorplans).filter(([, img]) => esDataUrl(img));
+      if (entradas.length === 0) return;
+      for (const [salon, img] of entradas) {
+        if (cancelado) return;
+        const path = `plantillas/${salon.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-migrado-${Date.now()}.png`;
+        const res = await uploadFile(path, img);
+        if (!cancelado && res.ok) {
+          setFloorplans(prev => ({ ...prev, [salon]: res.url }));
+        }
+      }
+    })();
+    return () => { cancelado = true; };
+  }, [ready]);
+
   useEffect(() => {
     if (!ready) return;
     // Traba de seguridad: si antes había eventos guardados y ahora el
@@ -356,9 +425,20 @@ function AppInner() {
     setEvents(prev => prev.map(e => ((e.fechaFin || e.fecha) < hoyISO && e.estadoPago !== "total") ? { ...e, estadoPago: "total" } : e));
     showToast(`${cantidad} evento(s) marcados como pagados ✓`);
   };
-  const handleSavePlano = (dataUrl, notas) => {
-    setEvents(prev => prev.map(e => e.id === selectedEvent.id ? { ...e, planoDibujo: dataUrl, planoNotas: notas } : e));
-    setSelectedEvent(prev => ({ ...prev, planoDibujo: dataUrl, planoNotas: notas }));
+  // Antes esto guardaba el dibujo (una imagen entera) pegado directo adentro
+  // del evento, lo que hacía que el bloque de "eventos" pesara cada vez más
+  // y la app tardara mucho en abrir. Ahora la imagen se sube al Storage de
+  // Supabase y en el evento solo queda guardado un link corto a esa imagen.
+  const handleSavePlano = async (dataUrl, notas) => {
+    const eventoId = selectedEvent.id;
+    const path = `planos/${eventoId}-${Date.now()}.png`;
+    const res = await uploadFile(path, dataUrl);
+    if (!res.ok) {
+      showToast("⚠️ No se pudo subir el plano (revisá tu conexión). Volvé a intentar.");
+      throw new Error("upload plano failed");
+    }
+    setEvents(prev => prev.map(e => e.id === eventoId ? { ...e, planoDibujo: res.url, planoNotas: notas } : e));
+    setSelectedEvent(prev => ({ ...prev, planoDibujo: res.url, planoNotas: notas }));
   };
 
   if (loadError) {

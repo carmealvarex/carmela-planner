@@ -229,7 +229,7 @@ export async function uploadFile(path, archivo, contentType) {
           upsert: true,
           contentType: contentType || blob.type || "application/octet-stream",
         }),
-      30000,
+      120000,
       `subir ${path}`
     );
     if (error) throw error;

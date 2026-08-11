@@ -280,6 +280,43 @@ function AppInner() {
     return () => { cancelado = true; };
   }, [ready]);
 
+  // ============================================================
+  // Guardar "eventos" con reintento automático.
+  //
+  // Como en esta app la única que edita es la organizadora (los
+  // invitados solo miran), lo que tenés en pantalla SIEMPRE es la
+  // versión correcta a guardar — nunca hace falta descartarla a favor
+  // de "lo que ya está en el servidor". Antes, si un guardado se
+  // cortaba a mitad de camino (corte de conexión momentáneo) pero en
+  // realidad SÍ se había aplicado del lado del servidor, el siguiente
+  // guardado lo malinterpretaba como "otra compu lo cambió" y pisaba
+  // tu pantalla con una versión vieja, perdiendo tu último cambio.
+  //
+  // Ahora, ante cualquier tropiezo (falla de red o un "conflicto"),
+  // primero nos ponemos al día con la marca de tiempo real del
+  // servidor y reintentamos guardar lo que tenés en pantalla — hasta
+  // 3 veces, con una pausa corta entre intento e intento. Solo si
+  // los 3 intentos fallan (problema real y persistente de conexión)
+  // se avisa para que reintentes manualmente.
+  // ============================================================
+  const guardarEventos = async (intentosRestantes = 3) => {
+    const res = await saveShared("eventos", events, eventosUpdatedAtRef.current);
+    if (res.ok && !res.conflict) {
+      eventosUpdatedAtRef.current = res.updatedAt;
+      return;
+    }
+    // Falló o hubo un "conflicto" (que acá siempre es un desajuste de
+    // marca de tiempo, no otra persona editando). Nos ponemos al día
+    // con el servidor y reintentamos con lo que tenés en pantalla.
+    const fresh = await loadShared("eventos", events);
+    if (fresh.ok) eventosUpdatedAtRef.current = fresh.updatedAt;
+    if (intentosRestantes > 0) {
+      await new Promise(r => setTimeout(r, 1500));
+      return guardarEventos(intentosRestantes - 1);
+    }
+    showToast("⚠️ No se pudo guardar por un problema de conexión. Revisá tu internet y volvé a intentar en un momento.");
+  };
+
   useEffect(() => {
     if (!ready) return;
     // Traba de seguridad: si antes había eventos guardados y ahora el
@@ -297,53 +334,27 @@ function AppInner() {
     // a que hagas una pausa de casi 1 segundo antes de guardar, en vez de
     // mandar un guardado a Supabase por cada letra. Esto también reduce
     // mucho las demoras al usar la app.
-    const t = setTimeout(async () => {
-      const res = await saveShared("eventos", events, eventosUpdatedAtRef.current);
-      if (!res.ok) {
-        showToast("⚠️ No se pudo guardar (revisá tu conexión). Vas a tener que volver a intentar.");
-        return;
-      }
-      if (res.conflict) {
-        // Otra computadora guardó eventos justo antes que nosotros. En vez de
-        // pisar esos cambios con los nuestros (que es lo que pasaba antes y
-        // te borraba planos y cambios), traemos la versión más nueva del
-        // servidor y avisamos, para que puedas volver a aplicar tu cambio.
-        const fresh = await loadShared("eventos", events);
-        if (fresh.ok) {
-          setEvents(fresh.value);
-          eventosUpdatedAtRef.current = fresh.updatedAt;
-          prevEventsCountRef.current = (fresh.value || []).length;
-          showToast("⚠️ Se guardó un cambio desde otra compu justo antes que el tuyo. Si tu último cambio no quedó, volvé a hacerlo.");
-        }
-        return;
-      }
-      eventosUpdatedAtRef.current = res.updatedAt;
-    }, 900);
+    const t = setTimeout(() => { guardarEventos(); }, 900);
     return () => clearTimeout(t);
   }, [events, ready]);
   useEffect(() => { if (ready) { const t = setTimeout(() => saveShared("jefeAreas", jefeAreas), 900); return () => clearTimeout(t); } }, [jefeAreas, ready]);
+  const guardarPlanos = async (intentosRestantes = 3) => {
+    const res = await saveShared("planos", floorplans, planosUpdatedAtRef.current);
+    if (res.ok && !res.conflict) {
+      planosUpdatedAtRef.current = res.updatedAt;
+      return;
+    }
+    const fresh = await loadShared("planos", floorplans);
+    if (fresh.ok) planosUpdatedAtRef.current = fresh.updatedAt;
+    if (intentosRestantes > 0) {
+      await new Promise(r => setTimeout(r, 1500));
+      return guardarPlanos(intentosRestantes - 1);
+    }
+    showToast("⚠️ No se pudo guardar el plano por un problema de conexión. Revisá tu internet y volvé a intentar en un momento.");
+  };
   useEffect(() => {
     if (!ready) return;
-    const t = setTimeout(async () => {
-      const res = await saveShared("planos", floorplans, planosUpdatedAtRef.current);
-      if (!res.ok) {
-        showToast("⚠️ No se pudo guardar el plano (revisá tu conexión). Volvé a intentar.");
-        return;
-      }
-      if (res.conflict) {
-        // Este es justo el caso que te borraba planos: alguien guardó un plano
-        // desde otra computadora en el medio. Ahora, en vez de pisarlo, traemos
-        // la versión más nueva y avisamos.
-        const fresh = await loadShared("planos", floorplans);
-        if (fresh.ok) {
-          setFloorplans(fresh.value);
-          planosUpdatedAtRef.current = fresh.updatedAt;
-          showToast("⚠️ Se guardó un cambio desde otra compu justo antes que el tuyo. Si tu último cambio no quedó, volvé a hacerlo.");
-        }
-        return;
-      }
-      planosUpdatedAtRef.current = res.updatedAt;
-    }, 900);
+    const t = setTimeout(() => { guardarPlanos(); }, 900);
     return () => clearTimeout(t);
   }, [floorplans, ready]);
   useEffect(() => { if (ready) { const t = setTimeout(() => saveShared("tarifas", tarifas), 900); return () => clearTimeout(t); } }, [tarifas, ready]);

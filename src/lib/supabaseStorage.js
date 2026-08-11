@@ -25,46 +25,85 @@ export const supabase = createClient(url || "", anonKey || "");
    ============================================================ */
 
 /* ============================================================
-   loadShared ahora devuelve { value, ok }:
+   loadShared devuelve { value, ok, updatedAt }:
      - ok === true  -> la lectura a Supabase funcionó (haya o no filas).
      - ok === false -> algo falló (red, timeout, permisos, etc). En este
        caso "value" trae el fallback, pero NO hay que confiar en él como
        si fuera el dato real: el llamador debe evitar guardar/sobrescribir
-       cuando ok es false. Antes esto no se distinguía, y una falla de
-       red silenciosa terminaba pisando datos reales con el fallback.
+       cuando ok es false.
+     - updatedAt -> la marca de tiempo con la que quedó guardado este
+       valor en el servidor. Guardala y pasala de vuelta a saveShared
+       para poder detectar si alguien más lo cambió mientras tanto
+       (ver saveShared más abajo).
    ============================================================ */
 export async function loadShared(key, fallback) {
   try {
     const { data, error } = await supabase
       .from("kv_store")
-      .select("value")
+      .select("value, updated_at")
       .eq("key", key)
       .maybeSingle();
     if (error) throw error;
-    return { value: data ? data.value : fallback, ok: true };
+    return { value: data ? data.value : fallback, ok: true, updatedAt: data ? data.updated_at : null };
   } catch (e) {
     console.error("storage load error", key, e);
-    return { value: fallback, ok: false };
+    return { value: fallback, ok: false, updatedAt: null };
   }
 }
 
 /* ============================================================
-   saveShared: guarda el valor y, ademas, guarda una copia de respaldo
-   con fecha en kv_store_backups (best-effort: si el backup falla no
-   frena el guardado principal). Ver README / migración SQL para crear
-   esa tabla.
+   saveShared(key, value, expectedUpdatedAt?)
+
+   Si se pasa expectedUpdatedAt (la marca de tiempo que devolvió el último
+   loadShared/saveShared para esa key), el guardado es "seguro": solo pisa
+   el valor en el servidor si nadie lo cambió desde la última vez que lo
+   leímos nosotros. Si en el medio otra computadora guardó algo, ESTE
+   guardado NO se aplica (para no pisar en silencio esos cambios) y
+   devuelve { conflict: true } para que quien llama decida qué hacer
+   (típicamente: releer el valor más nuevo del servidor y avisarle a
+   la persona en vez de perder datos calladamente).
+
+   Si NO se pasa expectedUpdatedAt, guarda "a la fuerza" (upsert normal,
+   como antes) — útil para keys donde no importa tanto un pisado
+   ocasional (configuración, preferencias chicas, etc).
+
+   Devuelve { ok, conflict, updatedAt }.
    ============================================================ */
-export async function saveShared(key, value) {
+export async function saveShared(key, value, expectedUpdatedAt) {
+  const nuevaMarca = new Date().toISOString();
   try {
-    const { error } = await supabase
-      .from("kv_store")
-      .upsert({ key, value, updated_at: new Date().toISOString() });
-    if (error) throw error;
+    if (expectedUpdatedAt) {
+      const { data, error } = await supabase
+        .from("kv_store")
+        .update({ value, updated_at: nuevaMarca })
+        .eq("key", key)
+        .eq("updated_at", expectedUpdatedAt)
+        .select("updated_at");
+      if (error) throw error;
+      if (!data || data.length === 0) {
+        // 0 filas afectadas: o no existía todavía, o (mucho más probable)
+        // alguien la actualizó después de que nosotros la leímos.
+        return { ok: true, conflict: true, updatedAt: expectedUpdatedAt };
+      }
+      guardarBackup(key, value);
+      return { ok: true, conflict: false, updatedAt: data[0].updated_at };
+    } else {
+      const { data, error } = await supabase
+        .from("kv_store")
+        .upsert({ key, value, updated_at: nuevaMarca })
+        .select("updated_at");
+      if (error) throw error;
+      guardarBackup(key, value);
+      return { ok: true, conflict: false, updatedAt: data?.[0]?.updated_at || nuevaMarca };
+    }
   } catch (e) {
     console.error("storage save error", key, e);
-    return;
+    return { ok: false, conflict: false, updatedAt: expectedUpdatedAt || null };
   }
+}
 
+// Backup best-effort: si falla, no rompe el guardado principal (ya se aplicó).
+async function guardarBackup(key, value) {
   try {
     await supabase.from("kv_store_backups").insert({ key, value });
     // Deja solo los ultimos 15 backups por key, para no acumular espacio infinito.
@@ -78,7 +117,6 @@ export async function saveShared(key, value) {
       await supabase.from("kv_store_backups").delete().in("id", viejos.map(v => v.id));
     }
   } catch (e) {
-    // El backup es una red de seguridad extra: si falla, no rompemos el guardado principal.
     console.error("storage backup error", key, e);
   }
 }
@@ -89,12 +127,17 @@ export async function saveShared(key, value) {
    Útil si algún día hace falta volver atrás.
    ============================================================ */
 export async function getBackups(key, limit = 15) {
-  const { data, error } = await supabase
-    .from("kv_store_backups")
-    .select("id, value, saved_at")
-    .eq("key", key)
-    .order("saved_at", { ascending: false })
-    .limit(limit);
-  if (error) { console.error("storage getBackups error", key, e); return []; }
-  return data || [];
+  try {
+    const { data, error } = await supabase
+      .from("kv_store_backups")
+      .select("id, value, saved_at")
+      .eq("key", key)
+      .order("saved_at", { ascending: false })
+      .limit(limit);
+    if (error) throw error;
+    return data || [];
+  } catch (e) {
+    console.error("storage getBackups error", key, e);
+    return [];
+  }
 }

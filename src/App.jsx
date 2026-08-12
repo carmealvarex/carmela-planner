@@ -76,6 +76,13 @@ function AppInner() {
   // silencio. Son las dos keys que reportaste con pérdida de datos: eventos y planos.
   const eventosUpdatedAtRef = useRef(null);
   const planosUpdatedAtRef = useRef(null);
+  // Traban para que, si guardás dos cosas seguidas muy rápido (ej.: subís
+  // dos planos uno atrás del otro), la app no arranque un segundo guardado
+  // mientras el primero todavía está en camino — eso era lo que hacía que
+  // dos guardados de la app compitieran entre sí y apareciera el cartel de
+  // "otra compu" sin que hubiera ninguna otra compu real de por medio.
+  const guardandoEventosRef = useRef(false);
+  const guardandoPlanosRef = useRef(false);
 
   const alertas = useMemo(() => {
     const lista = [];
@@ -299,7 +306,7 @@ function AppInner() {
   // los 3 intentos fallan (problema real y persistente de conexión)
   // se avisa para que reintentes manualmente.
   // ============================================================
-  const guardarEventos = async (intentosRestantes = 3) => {
+  const intentarGuardarEventos = async (intentosRestantes = 3) => {
     const res = await saveShared("eventos", events, eventosUpdatedAtRef.current);
     if (res.ok && !res.conflict) {
       eventosUpdatedAtRef.current = res.updatedAt;
@@ -312,9 +319,20 @@ function AppInner() {
     if (fresh.ok) eventosUpdatedAtRef.current = fresh.updatedAt;
     if (intentosRestantes > 0) {
       await new Promise(r => setTimeout(r, 1500));
-      return guardarEventos(intentosRestantes - 1);
+      return intentarGuardarEventos(intentosRestantes - 1);
     }
     showToast("⚠️ No se pudo guardar por un problema de conexión. Revisá tu internet y volvé a intentar en un momento.");
+  };
+  const guardarEventos = async () => {
+    // Si ya hay otro guardado de "eventos" en curso, esperamos a que
+    // termine antes de arrancar este, para que no compitan entre sí.
+    while (guardandoEventosRef.current) await new Promise(r => setTimeout(r, 300));
+    guardandoEventosRef.current = true;
+    try {
+      await intentarGuardarEventos();
+    } finally {
+      guardandoEventosRef.current = false;
+    }
   };
 
   useEffect(() => {
@@ -338,7 +356,7 @@ function AppInner() {
     return () => clearTimeout(t);
   }, [events, ready]);
   useEffect(() => { if (ready) { const t = setTimeout(() => saveShared("jefeAreas", jefeAreas), 900); return () => clearTimeout(t); } }, [jefeAreas, ready]);
-  const guardarPlanos = async (intentosRestantes = 3) => {
+  const intentarGuardarPlanos = async (intentosRestantes = 3) => {
     const res = await saveShared("planos", floorplans, planosUpdatedAtRef.current);
     if (res.ok && !res.conflict) {
       planosUpdatedAtRef.current = res.updatedAt;
@@ -348,9 +366,21 @@ function AppInner() {
     if (fresh.ok) planosUpdatedAtRef.current = fresh.updatedAt;
     if (intentosRestantes > 0) {
       await new Promise(r => setTimeout(r, 1500));
-      return guardarPlanos(intentosRestantes - 1);
+      return intentarGuardarPlanos(intentosRestantes - 1);
     }
     showToast("⚠️ No se pudo guardar el plano por un problema de conexión. Revisá tu internet y volvé a intentar en un momento.");
+  };
+  const guardarPlanos = async () => {
+    // Misma traba que arriba: si ya hay un guardado de "planos" en curso
+    // (ej.: subiste dos planos uno atrás del otro), esperamos a que
+    // termine antes de arrancar el siguiente.
+    while (guardandoPlanosRef.current) await new Promise(r => setTimeout(r, 300));
+    guardandoPlanosRef.current = true;
+    try {
+      await intentarGuardarPlanos();
+    } finally {
+      guardandoPlanosRef.current = false;
+    }
   };
   useEffect(() => {
     if (!ready) return;

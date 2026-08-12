@@ -15,6 +15,7 @@ import { PlanoEditor } from "./components/ImportPlano.jsx";
 import { Stats, BuscadorEventos } from "./components/StatsBuscadores.jsx";
 import { ListaPresupuestos, PresupuestoForm, PresupuestoDocumento } from "./components/Presupuesto.jsx";
 import { Settings } from "./components/Settings.jsx";
+import { Recordatorios } from "./components/Recordatorios.jsx";
 
 export default function App() {
   return (
@@ -42,6 +43,10 @@ function AppInner() {
   // Presupuestos: cotizaciones para mandarle a un cliente que todavía no reservó nada
   // (independientes de los eventos ya confirmados en el calendario).
   const [presupuestos, setPresupuestos] = useState([]);
+  // Recordatorios sueltos: avisos que no están atados a ningún evento puntual
+  // (ej: renovar un trámite). Se muestran junto a los recordatorios de cada
+  // evento en la solapa "Recordatorios" y también disparan la campanita.
+  const [recordatoriosSueltos, setRecordatoriosSueltos] = useState([]);
   const [presupuestoSeleccionado, setPresupuestoSeleccionado] = useState(null);
   const [presupuestoEditando, setPresupuestoEditando] = useState(null);
   const [view, setView] = useState("calendario");
@@ -114,12 +119,27 @@ function AppInner() {
         }
       });
     });
+    // Recordatorios sueltos (sin evento asociado): misma lógica de "avisar con
+    // tantos días de anticipación", pero contra su propia fecha en vez de la de un evento.
+    recordatoriosSueltos.forEach(r => {
+      const dias = diasHasta(r.fecha);
+      if (dias === null) return;
+      const diasAntes = Number(r.diasAntes) || 0;
+      if (dias >= 0 && dias <= diasAntes) {
+        lista.push({
+          id: `recsuelto-${r.id}`,
+          ev: null,
+          urgente: dias === 0,
+          texto: `${dias === 0 ? "Hoy" : `En ${dias} día${dias === 1 ? "" : "s"}`}: ${r.texto}`,
+        });
+      }
+    });
     const ahora = Date.now();
     return lista
       .filter(a => !alertasOcultas.includes(a.id))
       .filter(a => !(alertasPospuestas[a.id] && new Date(alertasPospuestas[a.id]).getTime() > ahora))
       .sort((a, b) => (a.urgente === b.urgente ? 0 : a.urgente ? -1 : 1));
-  }, [events, alertasOcultas, alertasPospuestas]);
+  }, [events, recordatoriosSueltos, alertasOcultas, alertasPospuestas]);
 
   // Posponer una notificación: vuelve a aparecer sola pasadas las horas indicadas.
   const posponerAlerta = (id, horas) => {
@@ -136,7 +156,7 @@ function AppInner() {
 
   useEffect(() => {
     (async () => {
-      const [ev, jefe, cfg, planos, tar, ocultas, pospuestas, presu] = await Promise.all([
+      const [ev, jefe, cfg, planos, tar, ocultas, pospuestas, presu, recSueltos] = await Promise.all([
         loadShared("eventos", []),
         loadShared("jefeAreas", { telefono: "" }),
         loadShared("config", { pin: null, proximoVale: 1, proximoVoucher: 1, proximoFicha: 1, proximoComanda: 1 }),
@@ -145,12 +165,13 @@ function AppInner() {
         loadShared("alertasOcultas", []),
         loadShared("alertasPospuestas", {}),
         loadShared("presupuestos", []),
+        loadShared("recordatoriosSueltos", []),
       ]);
 
       // Si CUALQUIERA de estas cargas falló (red, timeout, etc.), NO seguimos:
       // no activamos "ready", así los efectos de autoguardado no se disparan
       // y no hay riesgo de pisar datos reales con los valores de fallback.
-      const huboFallos = [ev, jefe, cfg, planos, tar, ocultas, pospuestas, presu].some(r => !r.ok);
+      const huboFallos = [ev, jefe, cfg, planos, tar, ocultas, pospuestas, presu, recSueltos].some(r => !r.ok);
       if (huboFallos) {
         console.error("Fallo la carga inicial de al menos una clave, se aborta para no sobrescribir datos.");
         setLoadError(true);
@@ -160,6 +181,7 @@ function AppInner() {
       setEvents(ev.value); setJefeAreas(jefe.value); setPin(cfg.value.pin); setProximoVale(cfg.value.proximoVale || 1);
       setProximoVoucher(cfg.value.proximoVoucher || 1); setProximoFicha(cfg.value.proximoFicha || 1); setProximoComanda(cfg.value.proximoComanda || 1);
       setFloorplans(planos.value); setTarifas(tar.value); setAlertasOcultas(ocultas.value); setAlertasPospuestas(pospuestas.value); setPresupuestos(presu.value);
+      setRecordatoriosSueltos(recSueltos.value);
       prevEventsCountRef.current = (ev.value || []).length;
       eventosUpdatedAtRef.current = ev.updatedAt;
       planosUpdatedAtRef.current = planos.updatedAt;
@@ -205,6 +227,9 @@ function AppInner() {
             break;
           case "presupuestos":
             setPresupuestos(fila.value || []);
+            break;
+          case "recordatoriosSueltos":
+            setRecordatoriosSueltos(fila.value || []);
             break;
           // "alertasOcultas"/"alertasPospuestas"/"config" son preferencias más
           // personales de quien está usando cada computadora, así que no
@@ -393,6 +418,7 @@ function AppInner() {
   useEffect(() => { if (ready) { const t = setTimeout(() => saveShared("alertasOcultas", alertasOcultas), 900); return () => clearTimeout(t); } }, [alertasOcultas, ready]);
   useEffect(() => { if (ready) { const t = setTimeout(() => saveShared("alertasPospuestas", alertasPospuestas), 900); return () => clearTimeout(t); } }, [alertasPospuestas, ready]);
   useEffect(() => { if (ready) { const t = setTimeout(() => saveShared("presupuestos", presupuestos), 900); return () => clearTimeout(t); } }, [presupuestos, ready]);
+  useEffect(() => { if (ready) { const t = setTimeout(() => saveShared("recordatoriosSueltos", recordatoriosSueltos), 900); return () => clearTimeout(t); } }, [recordatoriosSueltos, ready]);
 
   const setPinIfEmpty = (p) => { setPin(p); saveShared("config", { pin: p, proximoVale, proximoVoucher, proximoFicha, proximoComanda }); };
 
@@ -581,7 +607,10 @@ function AppInner() {
                         <div key={a.id} className="p-2.5 rounded"
                           style={{ background: a.urgente ? PENDIENTE_BG : PARCIAL_BG, border: `1px solid ${a.urgente ? PENDIENTE : PARCIAL}` }}>
                           <button
-                            onClick={() => { setSelectedEvent(a.ev); setView("ficha"); setNotifAbiertas(false); }}
+                            onClick={() => {
+                              if (a.ev) { setSelectedEvent(a.ev); setView("ficha"); } else { setView("recordatorios"); }
+                              setNotifAbiertas(false);
+                            }}
                             className="text-left w-full"
                             style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: INK, background: "none", border: "none", cursor: "pointer" }}
                           >
@@ -634,7 +663,7 @@ function AppInner() {
 
       <nav className="no-print px-5 py-3 flex gap-4 flex-wrap" style={{ background: CARD, borderBottom: `1px solid ${LINE}` }}>
         {(isAdmin
-          ? [["calendario", "Mes"], ["semana", "Semana"], ["dia", "Día"], ["buscar", "Buscar"], ["estadisticas", "Estadísticas"], ["presupuesto", "Presupuesto"], ["ajustes", "Ajustes"]]
+          ? [["calendario", "Mes"], ["semana", "Semana"], ["dia", "Día"], ["buscar", "Buscar"], ["recordatorios", "Recordatorios"], ["estadisticas", "Estadísticas"], ["presupuesto", "Presupuesto"], ["ajustes", "Ajustes"]]
           : [["calendario", "Mes"], ["semana", "Semana"], ["dia", "Día"], ["buscar", "Buscar"], ["estadisticas", "Estadísticas"]]
         ).map(([key, label]) => (
           <button key={key} onClick={() => setView(key)} className="text-sm font-medium pb-1"
@@ -741,6 +770,15 @@ function AppInner() {
 
         {view === "buscar" && (
           <BuscadorEventos events={events} onOpenEvent={(e) => { setSelectedEvent(e); setView("ficha"); }} />
+        )}
+
+        {view === "recordatorios" && isAdmin && (
+          <Recordatorios
+            events={events}
+            recordatoriosSueltos={recordatoriosSueltos}
+            setRecordatoriosSueltos={setRecordatoriosSueltos}
+            onOpenEvent={(e) => { setSelectedEvent(e); setView("ficha"); }}
+          />
         )}
 
         {view === "nuevo" && isAdmin && (

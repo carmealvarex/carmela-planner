@@ -39,6 +39,22 @@ export function Stats({ events }) {
     return { totalCubiertos, porTipo };
   }, [delMes]);
 
+  // Cuánto dinero representan los eventos del mes: el total cotizado (todo lo
+  // vendido, con IVA) y el total cobrado (lo que ya efectivamente entró, según
+  // el estado de pago de cada evento). Misma lógica que usa el consolidado del
+  // buscador por empresa más abajo, para que los números coincidan siempre.
+  const dineroMes = useMemo(() => {
+    return delMes.reduce((acc, e) => {
+      const { totalConIva } = totalItemsEvento(e);
+      const pagado = (e.estadoPago === "pagado" || e.estadoPago === "total")
+        ? totalConIva
+        : (e.estadoPago === "parcial" || e.estadoPago === "sena")
+          ? (Number(e.adelanto) || 0)
+          : 0;
+      return { cotizado: acc.cotizado + totalConIva, cobrado: acc.cobrado + pagado };
+    }, { cotizado: 0, cobrado: 0 });
+  }, [delMes]);
+
   // Cantidad de salones vendidos por mes, para cada uno de los 5 salones fijos del hotel.
   // En eventos de varios días, cada día de e.dias cuenta como una venta de salón aparte
   // (así un evento de 3 días con 2 días en un salón y 1 en otro se refleja correctamente).
@@ -72,6 +88,21 @@ export function Stats({ events }) {
 
       <div className="p-6 rounded" style={{ background: CARD, border: `1px solid ${INK}` }}>
         <PrintHeader eyebrow="Estadística mensual" titulo={`${MESES[month]} ${year}`} />
+
+        <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: MUTED, marginBottom: 10 }}>Cuánto le hiciste ganar al hotel este mes</p>
+        <div className="grid grid-cols-2 gap-4 mb-4">
+          <div className="p-4 rounded text-center" style={{ background: CP_BG }}>
+            <p style={{ fontFamily: FONT_MONO, fontSize: 24, color: CP_COLOR, fontWeight: 700 }}>$ {fmtMoney(dineroMes.cotizado)}</p>
+            <p style={{ fontFamily: FONT_BODY, fontSize: 11.5, color: MUTED, textTransform: "uppercase", letterSpacing: "0.06em" }}>Total cotizado (con IVA)</p>
+          </div>
+          <div className="p-4 rounded text-center" style={{ background: CP_BG }}>
+            <p style={{ fontFamily: FONT_MONO, fontSize: 24, color: CP_COLOR, fontWeight: 700 }}>$ {fmtMoney(dineroMes.cobrado)}</p>
+            <p style={{ fontFamily: FONT_BODY, fontSize: 11.5, color: MUTED, textTransform: "uppercase", letterSpacing: "0.06em" }}>Total cobrado</p>
+          </div>
+        </div>
+        <p style={{ fontFamily: FONT_BODY, fontSize: 11.5, color: MUTED, marginBottom: 20 }}>
+          "Cotizado" es todo lo vendido en eventos de {MESES[month]} (con IVA), independientemente de si ya se cobró. "Cobrado" es lo que ya entró de esos eventos, según el estado de pago cargado en cada uno (los parciales/señas cuentan solo por el adelanto cargado).
+        </p>
 
         <div className="grid grid-cols-2 gap-4 mb-4">
           <div className="p-4 rounded text-center" style={{ background: HILITE_BG }}>

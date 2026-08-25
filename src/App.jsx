@@ -15,7 +15,6 @@ import { PlanoEditor } from "./components/ImportPlano.jsx";
 import { Stats, BuscadorEventos } from "./components/StatsBuscadores.jsx";
 import { ListaPresupuestos, PresupuestoForm, PresupuestoDocumento } from "./components/Presupuesto.jsx";
 import { Settings } from "./components/Settings.jsx";
-import { Recordatorios } from "./components/Recordatorios.jsx";
 
 export default function App() {
   return (
@@ -43,10 +42,6 @@ function AppInner() {
   // Presupuestos: cotizaciones para mandarle a un cliente que todavía no reservó nada
   // (independientes de los eventos ya confirmados en el calendario).
   const [presupuestos, setPresupuestos] = useState([]);
-  // Recordatorios sueltos: avisos que no están atados a ningún evento puntual
-  // (ej: renovar un trámite). Se muestran junto a los recordatorios de cada
-  // evento en la solapa "Recordatorios" y también disparan la campanita.
-  const [recordatoriosSueltos, setRecordatoriosSueltos] = useState([]);
   const [presupuestoSeleccionado, setPresupuestoSeleccionado] = useState(null);
   const [presupuestoEditando, setPresupuestoEditando] = useState(null);
   const [view, setView] = useState("calendario");
@@ -81,13 +76,7 @@ function AppInner() {
   // silencio. Son las dos keys que reportaste con pérdida de datos: eventos y planos.
   const eventosUpdatedAtRef = useRef(null);
   const planosUpdatedAtRef = useRef(null);
-  // Traban para que, si guardás dos cosas seguidas muy rápido (ej.: subís
-  // dos planos uno atrás del otro), la app no arranque un segundo guardado
-  // mientras el primero todavía está en camino — eso era lo que hacía que
-  // dos guardados de la app compitieran entre sí y apareciera el cartel de
-  // "otra compu" sin que hubiera ninguna otra compu real de por medio.
-  const guardandoEventosRef = useRef(false);
-  const guardandoPlanosRef = useRef(false);
+  const presupuestosUpdatedAtRef = useRef(null);
 
   const alertas = useMemo(() => {
     const lista = [];
@@ -119,27 +108,12 @@ function AppInner() {
         }
       });
     });
-    // Recordatorios sueltos (sin evento asociado): misma lógica de "avisar con
-    // tantos días de anticipación", pero contra su propia fecha en vez de la de un evento.
-    recordatoriosSueltos.forEach(r => {
-      const dias = diasHasta(r.fecha);
-      if (dias === null) return;
-      const diasAntes = Number(r.diasAntes) || 0;
-      if (dias >= 0 && dias <= diasAntes) {
-        lista.push({
-          id: `recsuelto-${r.id}`,
-          ev: null,
-          urgente: dias === 0,
-          texto: `${dias === 0 ? "Hoy" : `En ${dias} día${dias === 1 ? "" : "s"}`}: ${r.texto}`,
-        });
-      }
-    });
     const ahora = Date.now();
     return lista
       .filter(a => !alertasOcultas.includes(a.id))
       .filter(a => !(alertasPospuestas[a.id] && new Date(alertasPospuestas[a.id]).getTime() > ahora))
       .sort((a, b) => (a.urgente === b.urgente ? 0 : a.urgente ? -1 : 1));
-  }, [events, recordatoriosSueltos, alertasOcultas, alertasPospuestas]);
+  }, [events, alertasOcultas, alertasPospuestas]);
 
   // Posponer una notificación: vuelve a aparecer sola pasadas las horas indicadas.
   const posponerAlerta = (id, horas) => {
@@ -156,7 +130,7 @@ function AppInner() {
 
   useEffect(() => {
     (async () => {
-      const [ev, jefe, cfg, planos, tar, ocultas, pospuestas, presu, recSueltos] = await Promise.all([
+      const [ev, jefe, cfg, planos, tar, ocultas, pospuestas, presu] = await Promise.all([
         loadShared("eventos", []),
         loadShared("jefeAreas", { telefono: "" }),
         loadShared("config", { pin: null, proximoVale: 1, proximoVoucher: 1, proximoFicha: 1, proximoComanda: 1 }),
@@ -165,13 +139,12 @@ function AppInner() {
         loadShared("alertasOcultas", []),
         loadShared("alertasPospuestas", {}),
         loadShared("presupuestos", []),
-        loadShared("recordatoriosSueltos", []),
       ]);
 
       // Si CUALQUIERA de estas cargas falló (red, timeout, etc.), NO seguimos:
       // no activamos "ready", así los efectos de autoguardado no se disparan
       // y no hay riesgo de pisar datos reales con los valores de fallback.
-      const huboFallos = [ev, jefe, cfg, planos, tar, ocultas, pospuestas, presu, recSueltos].some(r => !r.ok);
+      const huboFallos = [ev, jefe, cfg, planos, tar, ocultas, pospuestas, presu].some(r => !r.ok);
       if (huboFallos) {
         console.error("Fallo la carga inicial de al menos una clave, se aborta para no sobrescribir datos.");
         setLoadError(true);
@@ -181,10 +154,10 @@ function AppInner() {
       setEvents(ev.value); setJefeAreas(jefe.value); setPin(cfg.value.pin); setProximoVale(cfg.value.proximoVale || 1);
       setProximoVoucher(cfg.value.proximoVoucher || 1); setProximoFicha(cfg.value.proximoFicha || 1); setProximoComanda(cfg.value.proximoComanda || 1);
       setFloorplans(planos.value); setTarifas(tar.value); setAlertasOcultas(ocultas.value); setAlertasPospuestas(pospuestas.value); setPresupuestos(presu.value);
-      setRecordatoriosSueltos(recSueltos.value);
       prevEventsCountRef.current = (ev.value || []).length;
       eventosUpdatedAtRef.current = ev.updatedAt;
       planosUpdatedAtRef.current = planos.updatedAt;
+      presupuestosUpdatedAtRef.current = presu.updatedAt;
       setReady(true);
     })();
   }, []);
@@ -226,10 +199,9 @@ function AppInner() {
             setJefeAreas(fila.value || { telefono: "" });
             break;
           case "presupuestos":
+            if (fila.updated_at === presupuestosUpdatedAtRef.current) return;
             setPresupuestos(fila.value || []);
-            break;
-          case "recordatoriosSueltos":
-            setRecordatoriosSueltos(fila.value || []);
+            presupuestosUpdatedAtRef.current = fila.updated_at;
             break;
           // "alertasOcultas"/"alertasPospuestas"/"config" son preferencias más
           // personales de quien está usando cada computadora, así que no
@@ -284,7 +256,6 @@ function AppInner() {
           setEvents(prev => prev.map(e => (e.id === ev.id ? { ...e, ...cambios } : e)));
         }
       }
-      if (!cancelado) showToast(`Listo: se optimizaron ${pendientes.length} archivo(s) ✓`);
     })();
     return () => { cancelado = true; };
   }, [ready]);
@@ -312,54 +283,6 @@ function AppInner() {
     return () => { cancelado = true; };
   }, [ready]);
 
-  // ============================================================
-  // Guardar "eventos" con reintento automático.
-  //
-  // Como en esta app la única que edita es la organizadora (los
-  // invitados solo miran), lo que tenés en pantalla SIEMPRE es la
-  // versión correcta a guardar — nunca hace falta descartarla a favor
-  // de "lo que ya está en el servidor". Antes, si un guardado se
-  // cortaba a mitad de camino (corte de conexión momentáneo) pero en
-  // realidad SÍ se había aplicado del lado del servidor, el siguiente
-  // guardado lo malinterpretaba como "otra compu lo cambió" y pisaba
-  // tu pantalla con una versión vieja, perdiendo tu último cambio.
-  //
-  // Ahora, ante cualquier tropiezo (falla de red o un "conflicto"),
-  // primero nos ponemos al día con la marca de tiempo real del
-  // servidor y reintentamos guardar lo que tenés en pantalla — hasta
-  // 3 veces, con una pausa corta entre intento e intento. Solo si
-  // los 3 intentos fallan (problema real y persistente de conexión)
-  // se avisa para que reintentes manualmente.
-  // ============================================================
-  const intentarGuardarEventos = async (intentosRestantes = 3) => {
-    const res = await saveShared("eventos", events, eventosUpdatedAtRef.current);
-    if (res.ok && !res.conflict) {
-      eventosUpdatedAtRef.current = res.updatedAt;
-      return;
-    }
-    // Falló o hubo un "conflicto" (que acá siempre es un desajuste de
-    // marca de tiempo, no otra persona editando). Nos ponemos al día
-    // con el servidor y reintentamos con lo que tenés en pantalla.
-    const fresh = await loadShared("eventos", events);
-    if (fresh.ok) eventosUpdatedAtRef.current = fresh.updatedAt;
-    if (intentosRestantes > 0) {
-      await new Promise(r => setTimeout(r, 1500));
-      return intentarGuardarEventos(intentosRestantes - 1);
-    }
-    showToast("⚠️ No se pudo guardar por un problema de conexión. Revisá tu internet y volvé a intentar en un momento.");
-  };
-  const guardarEventos = async () => {
-    // Si ya hay otro guardado de "eventos" en curso, esperamos a que
-    // termine antes de arrancar este, para que no compitan entre sí.
-    while (guardandoEventosRef.current) await new Promise(r => setTimeout(r, 300));
-    guardandoEventosRef.current = true;
-    try {
-      await intentarGuardarEventos();
-    } finally {
-      guardandoEventosRef.current = false;
-    }
-  };
-
   useEffect(() => {
     if (!ready) return;
     // Traba de seguridad: si antes había eventos guardados y ahora el
@@ -377,39 +300,53 @@ function AppInner() {
     // a que hagas una pausa de casi 1 segundo antes de guardar, en vez de
     // mandar un guardado a Supabase por cada letra. Esto también reduce
     // mucho las demoras al usar la app.
-    const t = setTimeout(() => { guardarEventos(); }, 900);
+    const t = setTimeout(async () => {
+      const res = await saveShared("eventos", events, eventosUpdatedAtRef.current);
+      if (!res.ok) {
+        showToast("⚠️ No se pudo guardar (revisá tu conexión). Vas a tener que volver a intentar.");
+        return;
+      }
+      if (res.conflict) {
+        // Otra computadora guardó eventos justo antes que nosotros. En vez de
+        // pisar esos cambios con los nuestros (que es lo que pasaba antes y
+        // te borraba planos y cambios), traemos la versión más nueva del
+        // servidor y avisamos, para que puedas volver a aplicar tu cambio.
+        const fresh = await loadShared("eventos", events);
+        if (fresh.ok) {
+          setEvents(fresh.value);
+          eventosUpdatedAtRef.current = fresh.updatedAt;
+          prevEventsCountRef.current = (fresh.value || []).length;
+          showToast("⚠️ Otra computadora guardó cambios justo antes que vos — se actualizó con esa versión. Si tu último cambio no quedó, volvé a hacerlo.");
+        }
+        return;
+      }
+      eventosUpdatedAtRef.current = res.updatedAt;
+    }, 900);
     return () => clearTimeout(t);
   }, [events, ready]);
   useEffect(() => { if (ready) { const t = setTimeout(() => saveShared("jefeAreas", jefeAreas), 900); return () => clearTimeout(t); } }, [jefeAreas, ready]);
-  const intentarGuardarPlanos = async (intentosRestantes = 3) => {
-    const res = await saveShared("planos", floorplans, planosUpdatedAtRef.current);
-    if (res.ok && !res.conflict) {
-      planosUpdatedAtRef.current = res.updatedAt;
-      return;
-    }
-    const fresh = await loadShared("planos", floorplans);
-    if (fresh.ok) planosUpdatedAtRef.current = fresh.updatedAt;
-    if (intentosRestantes > 0) {
-      await new Promise(r => setTimeout(r, 1500));
-      return intentarGuardarPlanos(intentosRestantes - 1);
-    }
-    showToast("⚠️ No se pudo guardar el plano por un problema de conexión. Revisá tu internet y volvé a intentar en un momento.");
-  };
-  const guardarPlanos = async () => {
-    // Misma traba que arriba: si ya hay un guardado de "planos" en curso
-    // (ej.: subiste dos planos uno atrás del otro), esperamos a que
-    // termine antes de arrancar el siguiente.
-    while (guardandoPlanosRef.current) await new Promise(r => setTimeout(r, 300));
-    guardandoPlanosRef.current = true;
-    try {
-      await intentarGuardarPlanos();
-    } finally {
-      guardandoPlanosRef.current = false;
-    }
-  };
   useEffect(() => {
     if (!ready) return;
-    const t = setTimeout(() => { guardarPlanos(); }, 900);
+    const t = setTimeout(async () => {
+      const res = await saveShared("planos", floorplans, planosUpdatedAtRef.current);
+      if (!res.ok) {
+        showToast("⚠️ No se pudo guardar el plano (revisá tu conexión). Volvé a intentar.");
+        return;
+      }
+      if (res.conflict) {
+        // Este es justo el caso que te borraba planos: alguien guardó un plano
+        // desde otra computadora en el medio. Ahora, en vez de pisarlo, traemos
+        // la versión más nueva y avisamos.
+        const fresh = await loadShared("planos", floorplans);
+        if (fresh.ok) {
+          setFloorplans(fresh.value);
+          planosUpdatedAtRef.current = fresh.updatedAt;
+          showToast("⚠️ Otra computadora guardó un plano justo antes que vos — se actualizó con esa versión. Si tu plano no quedó, volvé a armarlo y guardarlo.");
+        }
+        return;
+      }
+      planosUpdatedAtRef.current = res.updatedAt;
+    }, 900);
     return () => clearTimeout(t);
   }, [floorplans, ready]);
   useEffect(() => { if (ready) { const t = setTimeout(() => saveShared("tarifas", tarifas), 900); return () => clearTimeout(t); } }, [tarifas, ready]);
@@ -417,8 +354,31 @@ function AppInner() {
   // no vuelvan a aparecer cada vez que se abre la app.
   useEffect(() => { if (ready) { const t = setTimeout(() => saveShared("alertasOcultas", alertasOcultas), 900); return () => clearTimeout(t); } }, [alertasOcultas, ready]);
   useEffect(() => { if (ready) { const t = setTimeout(() => saveShared("alertasPospuestas", alertasPospuestas), 900); return () => clearTimeout(t); } }, [alertasPospuestas, ready]);
-  useEffect(() => { if (ready) { const t = setTimeout(() => saveShared("presupuestos", presupuestos), 900); return () => clearTimeout(t); } }, [presupuestos, ready]);
-  useEffect(() => { if (ready) { const t = setTimeout(() => saveShared("recordatoriosSueltos", recordatoriosSueltos), 900); return () => clearTimeout(t); } }, [recordatoriosSueltos, ready]);
+  useEffect(() => {
+    if (!ready) return;
+    const t = setTimeout(async () => {
+      const res = await saveShared("presupuestos", presupuestos, presupuestosUpdatedAtRef.current);
+      if (!res.ok) {
+        showToast("⚠️ No se pudo guardar el presupuesto (revisá tu conexión). Volvé a intentar.");
+        return;
+      }
+      if (res.conflict) {
+        // Esto es justo lo que te estaba pasando: otra pestaña u otra compu
+        // guardó presupuestos justo antes que vos, y el guardado viejo lo
+        // pisaba en silencio. Ahora, en vez de pisarlo, traemos la versión
+        // más nueva y avisamos.
+        const fresh = await loadShared("presupuestos", presupuestos);
+        if (fresh.ok) {
+          setPresupuestos(fresh.value);
+          presupuestosUpdatedAtRef.current = fresh.updatedAt;
+          showToast("⚠️ Otra pestaña/compu guardó presupuestos justo antes que vos — se actualizó con esa versión. Si tu último cambio no quedó, volvé a hacerlo.");
+        }
+        return;
+      }
+      presupuestosUpdatedAtRef.current = res.updatedAt;
+    }, 900);
+    return () => clearTimeout(t);
+  }, [presupuestos, ready]);
 
   const setPinIfEmpty = (p) => { setPin(p); saveShared("config", { pin: p, proximoVale, proximoVoucher, proximoFicha, proximoComanda }); };
 
@@ -454,6 +414,14 @@ function AppInner() {
     if (nVale !== proximoVale || nVoucher !== proximoVoucher || nFicha !== proximoFicha || nComanda !== proximoComanda) {
       setProximoVale(nVale); setProximoVoucher(nVoucher); setProximoFicha(nFicha); setProximoComanda(nComanda);
       saveShared("config", { pin, proximoVale: nVale, proximoVoucher: nVoucher, proximoFicha: nFicha, proximoComanda: nComanda });
+    }
+    // La primera vez que se guarda un evento (todavía no existía), le
+    // registramos la fecha de alta. Sirve después para calcular cuántos
+    // días pasaron entre que lo cargaste y la fecha real del evento
+    // ("cuánto tardaste en organizarlo"), en Estadísticas.
+    const esNuevo = !events.some(e => e.id === finalEv.id);
+    if (esNuevo && !finalEv.fechaCreacion) {
+      finalEv = { ...finalEv, fechaCreacion: new Date().toISOString() };
     }
     setEvents(prev => {
       const exists = prev.some(e => e.id === finalEv.id);
@@ -607,10 +575,7 @@ function AppInner() {
                         <div key={a.id} className="p-2.5 rounded"
                           style={{ background: a.urgente ? PENDIENTE_BG : PARCIAL_BG, border: `1px solid ${a.urgente ? PENDIENTE : PARCIAL}` }}>
                           <button
-                            onClick={() => {
-                              if (a.ev) { setSelectedEvent(a.ev); setView("ficha"); } else { setView("recordatorios"); }
-                              setNotifAbiertas(false);
-                            }}
+                            onClick={() => { setSelectedEvent(a.ev); setView("ficha"); setNotifAbiertas(false); }}
                             className="text-left w-full"
                             style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: INK, background: "none", border: "none", cursor: "pointer" }}
                           >
@@ -663,7 +628,7 @@ function AppInner() {
 
       <nav className="no-print px-5 py-3 flex gap-4 flex-wrap" style={{ background: CARD, borderBottom: `1px solid ${LINE}` }}>
         {(isAdmin
-          ? [["calendario", "Mes"], ["semana", "Semana"], ["dia", "Día"], ["buscar", "Buscar"], ["recordatorios", "Recordatorios"], ["estadisticas", "Estadísticas"], ["presupuesto", "Presupuesto"], ["ajustes", "Ajustes"]]
+          ? [["calendario", "Mes"], ["semana", "Semana"], ["dia", "Día"], ["buscar", "Buscar"], ["estadisticas", "Estadísticas"], ["presupuesto", "Presupuesto"], ["ajustes", "Ajustes"]]
           : [["calendario", "Mes"], ["semana", "Semana"], ["dia", "Día"], ["buscar", "Buscar"], ["estadisticas", "Estadísticas"]]
         ).map(([key, label]) => (
           <button key={key} onClick={() => setView(key)} className="text-sm font-medium pb-1"
@@ -770,15 +735,6 @@ function AppInner() {
 
         {view === "buscar" && (
           <BuscadorEventos events={events} onOpenEvent={(e) => { setSelectedEvent(e); setView("ficha"); }} />
-        )}
-
-        {view === "recordatorios" && isAdmin && (
-          <Recordatorios
-            events={events}
-            recordatoriosSueltos={recordatoriosSueltos}
-            setRecordatoriosSueltos={setRecordatoriosSueltos}
-            onOpenEvent={(e) => { setSelectedEvent(e); setView("ficha"); }}
-          />
         )}
 
         {view === "nuevo" && isAdmin && (

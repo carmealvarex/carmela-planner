@@ -16,9 +16,14 @@ export function MonthView({ year, month, events, onPrev, onNext, onDayClick }) {
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
-        <button onClick={onPrev} style={{ color: ACCENT }} className="text-2xl px-2">‹</button>
+        <button onClick={onPrev} style={{ color: ACCENT }} className="no-print text-2xl px-2">‹</button>
         <h2 style={{ fontFamily: FONT_HEAD, fontSize: 26, color: INK }}>{MESES[month]} {year}</h2>
-        <button onClick={onNext} style={{ color: ACCENT }} className="text-2xl px-2">›</button>
+        <div className="flex items-center gap-2">
+          <button onClick={() => window.print()} className="no-print text-xs px-3 py-1.5 rounded" style={{ border: `1px solid ${LINE}`, color: MUTED, fontFamily: FONT_BODY }}>
+            🖨️ Imprimir
+          </button>
+          <button onClick={onNext} style={{ color: ACCENT }} className="no-print text-2xl px-2">›</button>
+        </div>
       </div>
       <div className="grid grid-cols-7 mb-1">
         {DIAS_CORTOS.map(d => <div key={d} className="text-center text-sm py-1.5" style={{ color: MUTED, fontFamily: FONT_BODY }}>{d}</div>)}
@@ -65,24 +70,31 @@ export function MonthView({ year, month, events, onPrev, onNext, onDayClick }) {
    PLANILLA IMPRIMIBLE DEL MES — SOLO NOMBRE DE SALÓN
 
    Pensada para imprimir y pegar en algún lugar donde la vea el personal
-   de limpieza/mantenimiento: muestra qué salón está ocupado cada día,
-   sin nombre de cliente, sin horario, sin ningún dato del evento. Es un
+   de limpieza/mantenimiento: muestra qué salón está ocupado cada día y a
+   qué hora, sin nombre de cliente ni ningún otro dato del evento. Es un
    componente aparte del calendario normal (MonthView) — no lo toca ni
    depende de él, para no arriesgar nada de lo que ya funciona ahí.
    ============================================================ */
 export function MonthPrintSalones({ year, month, events, onPrev, onNext, onBack }) {
   const weeks = useMemo(() => getMonthGrid(year, month), [year, month]);
-  // Por día, la lista de salones ocupados (sin repetir, sin nombre de cliente).
+  // Por día, la lista de salones ocupados con su horario (sin nombre de cliente).
+  // Si el mismo salón tiene más de un evento el mismo día, se listan los dos
+  // horarios por separado (puede pasar con eventos cortos, tipo café + cena).
   const salonesPorDia = useMemo(() => {
     const map = {};
     events.forEach(e => {
       if (!e.salon) return;
+      const salones = [e.salon, e.salonAdicional].filter(Boolean);
       fechasEvento(e).forEach(iso => {
-        const set = (map[iso] = map[iso] || new Set());
-        set.add(e.salon);
-        if (e.salonAdicional) set.add(e.salonAdicional);
+        const lista = (map[iso] = map[iso] || []);
+        salones.forEach(s => {
+          const horario = e.horaInicio && e.horaFin ? `${e.horaInicio}–${e.horaFin}` : "";
+          const clave = `${s}|${horario}`;
+          if (!lista.some(x => `${x.salon}|${x.horario}` === clave)) lista.push({ salon: s, horario });
+        });
       });
     });
+    Object.values(map).forEach(lista => lista.sort((a, b) => a.salon.localeCompare(b.salon) || a.horario.localeCompare(b.horario)));
     return map;
   }, [events]);
   const today = toISO(new Date());
@@ -112,19 +124,20 @@ export function MonthPrintSalones({ year, month, events, onPrev, onNext, onBack 
             {week.map((d, di) => {
               if (!d) return <div key={di} />;
               const iso = toISO(d);
-              const salones = Array.from(salonesPorDia[iso] || []);
+              const salones = salonesPorDia[iso] || [];
               const isToday = iso === today;
               return (
                 <div key={di} className="p-2 rounded-lg"
                   style={{
-                    minHeight: 96, background: CARD,
+                    minHeight: 112, background: CARD,
                     border: isToday ? `2px solid ${ACCENT}` : `1px solid ${LINE}`,
                   }}>
                   <div style={{ fontFamily: FONT_MONO, fontSize: 14, color: INK, fontWeight: isToday ? 700 : 400 }}>{d.getDate()}</div>
                   <div className="flex flex-col gap-1 mt-1.5">
-                    {salones.map(s => (
-                      <div key={s} className="rounded px-1.5 py-1" style={{ fontSize: 13, background: INK_SOFT, color: PAPER, fontFamily: FONT_BODY, fontWeight: 600, textAlign: "center" }}>
-                        {s}
+                    {salones.map(({ salon, horario }) => (
+                      <div key={`${salon}-${horario}`} className="rounded px-1.5 py-1" style={{ fontSize: 13, background: INK_SOFT, color: PAPER, fontFamily: FONT_BODY, textAlign: "center" }}>
+                        <div style={{ fontWeight: 600 }}>{salon}</div>
+                        {horario && <div style={{ fontSize: 11, opacity: 0.85 }}>{horario}</div>}
                       </div>
                     ))}
                   </div>

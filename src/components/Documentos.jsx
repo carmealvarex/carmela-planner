@@ -147,6 +147,13 @@ export function Voucher({ ev, onBack }) {
           )}
         </div>
 
+        {ev.condicionesContratacion && (
+          <div className="p-3 mb-4" style={{ background: HILITE_BG, fontFamily: FONT_BODY, fontSize: 12.5, color: INK, whiteSpace: "pre-wrap", lineHeight: 1.5 }}>
+            <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: INK, marginBottom: 6, fontWeight: 600 }}>Condiciones de contratación</p>
+            {ev.condicionesContratacion}
+          </div>
+        )}
+
         <p style={{ fontFamily: FONT_BODY, fontSize: 11, color: MUTED }}>Este comprobante confirma la reserva de la fecha con todo lo contratado. Ante cualquier consulta, comunicate con el hotel citando el nombre del evento y la fecha.</p>
         <p className="mt-6" style={{ fontFamily: FONT_MONO, fontSize: 10.5, color: MUTED }}>Generado el {new Date().toLocaleDateString("es-AR")}</p>
       </div>

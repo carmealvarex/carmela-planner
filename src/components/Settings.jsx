@@ -6,7 +6,7 @@ import { DropZone, ImportICS } from "./ImportPlano.jsx";
 import { useAppAlert } from "./ConfirmDialog.jsx";
 import { uploadFile, esDataUrl, deleteFile } from "../lib/supabaseStorage.js";
 
-export function Settings({ jefeAreas, setJefeAreas, tarifas, setTarifas, floorplans, setFloorplans, events, onImportEvents, onMarkPastAsPaid }) {
+export function Settings({ jefeAreas, setJefeAreas, tarifas, setTarifas, floorplans, setFloorplans, events, onImportEvents, onMarkPastAsPaid, condicionesContratacion, setCondicionesContratacion }) {
   const alertUser = useAppAlert();
   const [nuevoSalon, setNuevoSalon] = useState("");
   const [tab, setTab] = useState("tarifas");
@@ -18,16 +18,12 @@ export function Settings({ jefeAreas, setJefeAreas, tarifas, setTarifas, floorpl
   // solo queda un link corto a esa imagen.
   const subirPlano = async (salon, file) => {
     if (!salon.trim() || !file) return;
-    if (file.size > 15 * 1024 * 1024) {
-      await alertUser("Esa imagen pesa más de 15 MB, es probable que la subida falle con conexiones lentas. Si podés, sacá la foto con menos resolución (o recortala) y volvé a intentar.");
-      return;
-    }
     setSubiendoPlano(true);
     const path = `plantillas/${salon.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${Date.now()}.png`;
     const res = await uploadFile(path, file, file.type);
     setSubiendoPlano(false);
     if (!res.ok) {
-      await alertUser("No se pudo subir el plano. Puede ser la conexión (si el wifi es lento, probá con más señal) o que el archivo sea muy pesado. Volvé a intentar.");
+      await alertUser("No se pudo subir el plano (revisá tu conexión). Volvé a intentar.");
       return;
     }
     setFloorplans(prev => ({ ...prev, [salon.trim()]: res.url }));
@@ -50,6 +46,7 @@ export function Settings({ jefeAreas, setJefeAreas, tarifas, setTarifas, floorpl
     ["tarifas", "Tarifas"],
     ["planos", "Planos"],
     ["jefeareas", "Jefe de Áreas"],
+    ["condiciones", "Condiciones de contratación"],
     ["importar", "Importar"],
     ["notificaciones", "Notificaciones"],
     ["backup", "Backup"],
@@ -153,6 +150,22 @@ export function Settings({ jefeAreas, setJefeAreas, tarifas, setTarifas, floorpl
             <p style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: INK, marginBottom: 6 }}><b>Voucher:</b> el detalle completo del evento para el cliente — salón, cotización, ítems, estado de pago.</p>
             <p style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: INK }}><b>Vale:</b> lo que necesita Administración — un número que coincide con la factura, cuántos salones y cuántos cubiertos se vendieron (discriminados por tipo).</p>
           </div>
+        </div>
+      )}
+
+      {tab === "condiciones" && (
+        <div className="p-5 rounded" style={{ background: CARD, border: `1px solid ${LINE}` }}>
+          <h3 style={{ fontFamily: FONT_HEAD, fontSize: 20, color: INK, marginBottom: 12 }}>Condiciones de contratación</h3>
+          <p style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: MUTED, marginBottom: 16 }}>
+            Este texto aparece al final del Voucher de cada evento. Cuando cargás un evento nuevo, el texto que esté escrito acá en ese momento queda guardado adentro de ese evento para siempre — si más adelante cambiás las condiciones acá, los vouchers de eventos ya cargados van a seguir mostrando las condiciones viejas (las que regían cuando se cargó cada uno), y solo los eventos nuevos van a usar el texto actualizado.
+          </p>
+          <textarea
+            value={condicionesContratacion}
+            onChange={e => setCondicionesContratacion(e.target.value)}
+            rows={10}
+            placeholder={"Ej: Seña del 50% para confirmar la reserva. Saldo a abonar hasta 48hs antes del evento. Cancelaciones con menos de 7 días de anticipación no reintegran la seña…"}
+            style={{ ...inputStyle, width: "100%", resize: "vertical", fontFamily: FONT_BODY, lineHeight: 1.5 }}
+          />
         </div>
       )}
 

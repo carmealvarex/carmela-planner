@@ -6,7 +6,7 @@ import { diasHasta, fromISO, mondayOf, toISO } from "./utils/helpers.js";
 import { blankEvent } from "./utils/eventHelpers.js";
 import { LogoCA } from "./components/common.jsx";
 import { RoleGate } from "./components/RoleGate.jsx";
-import { MonthView, WeekView, DayView } from "./components/CalendarViews.jsx";
+import { MonthView, WeekView, DayView, MonthPrintSalones } from "./components/CalendarViews.jsx";
 import { EventForm } from "./components/EventForm.jsx";
 import { FichaCompleta, EventoResumen } from "./components/FichaViews.jsx";
 import { Voucher, Vale, Comanda } from "./components/Documentos.jsx";
@@ -37,6 +37,12 @@ function AppInner() {
   const [proximoComanda, setProximoComanda] = useState(1);
   const [events, setEvents] = useState([]);
   const [jefeAreas, setJefeAreas] = useState({ telefono: "" });
+  // Texto de condiciones de contratación del hotel (editable en Ajustes). Cuando
+  // se carga un evento nuevo, el texto vigente en ese momento queda "congelado"
+  // adentro del evento (ev.condicionesContratacion), así el váucher de un evento
+  // viejo siempre muestra las condiciones que regían cuando se cargó, aunque el
+  // hotel las cambie después.
+  const [condicionesContratacion, setCondicionesContratacion] = useState("");
   const [tarifas, setTarifas] = useState({});
   const [floorplans, setFloorplans] = useState({});
   // Presupuestos: cotizaciones para mandarle a un cliente que todavía no reservó nada
@@ -130,7 +136,7 @@ function AppInner() {
 
   useEffect(() => {
     (async () => {
-      const [ev, jefe, cfg, planos, tar, ocultas, pospuestas, presu] = await Promise.all([
+      const [ev, jefe, cfg, planos, tar, ocultas, pospuestas, presu, condiciones] = await Promise.all([
         loadShared("eventos", []),
         loadShared("jefeAreas", { telefono: "" }),
         loadShared("config", { pin: null, proximoVale: 1, proximoVoucher: 1, proximoFicha: 1, proximoComanda: 1 }),
@@ -139,12 +145,13 @@ function AppInner() {
         loadShared("alertasOcultas", []),
         loadShared("alertasPospuestas", {}),
         loadShared("presupuestos", []),
+        loadShared("condicionesContratacion", ""),
       ]);
 
       // Si CUALQUIERA de estas cargas falló (red, timeout, etc.), NO seguimos:
       // no activamos "ready", así los efectos de autoguardado no se disparan
       // y no hay riesgo de pisar datos reales con los valores de fallback.
-      const huboFallos = [ev, jefe, cfg, planos, tar, ocultas, pospuestas, presu].some(r => !r.ok);
+      const huboFallos = [ev, jefe, cfg, planos, tar, ocultas, pospuestas, presu, condiciones].some(r => !r.ok);
       if (huboFallos) {
         console.error("Fallo la carga inicial de al menos una clave, se aborta para no sobrescribir datos.");
         setLoadError(true);
@@ -154,6 +161,7 @@ function AppInner() {
       setEvents(ev.value); setJefeAreas(jefe.value); setPin(cfg.value.pin); setProximoVale(cfg.value.proximoVale || 1);
       setProximoVoucher(cfg.value.proximoVoucher || 1); setProximoFicha(cfg.value.proximoFicha || 1); setProximoComanda(cfg.value.proximoComanda || 1);
       setFloorplans(planos.value); setTarifas(tar.value); setAlertasOcultas(ocultas.value); setAlertasPospuestas(pospuestas.value); setPresupuestos(presu.value);
+      setCondicionesContratacion(condiciones.value || "");
       prevEventsCountRef.current = (ev.value || []).length;
       eventosUpdatedAtRef.current = ev.updatedAt;
       planosUpdatedAtRef.current = planos.updatedAt;
@@ -197,6 +205,9 @@ function AppInner() {
             break;
           case "jefeAreas":
             setJefeAreas(fila.value || { telefono: "" });
+            break;
+          case "condicionesContratacion":
+            setCondicionesContratacion(fila.value || "");
             break;
           case "presupuestos":
             if (fila.updated_at === presupuestosUpdatedAtRef.current) return;
@@ -325,6 +336,7 @@ function AppInner() {
     return () => clearTimeout(t);
   }, [events, ready]);
   useEffect(() => { if (ready) { const t = setTimeout(() => saveShared("jefeAreas", jefeAreas), 900); return () => clearTimeout(t); } }, [jefeAreas, ready]);
+  useEffect(() => { if (ready) { const t = setTimeout(() => saveShared("condicionesContratacion", condicionesContratacion), 900); return () => clearTimeout(t); } }, [condicionesContratacion, ready]);
   useEffect(() => {
     if (!ready) return;
     const t = setTimeout(async () => {
@@ -422,6 +434,12 @@ function AppInner() {
     const esNuevo = !events.some(e => e.id === finalEv.id);
     if (esNuevo && !finalEv.fechaCreacion) {
       finalEv = { ...finalEv, fechaCreacion: new Date().toISOString() };
+    }
+    // Mismo criterio: las condiciones de contratación vigentes en este momento
+    // quedan "congeladas" adentro del evento. Si el hotel las cambia más
+    // adelante, el váucher de este evento va a seguir mostrando las de hoy.
+    if (esNuevo && !finalEv.condicionesContratacion && condicionesContratacion) {
+      finalEv = { ...finalEv, condicionesContratacion };
     }
     setEvents(prev => {
       const exists = prev.some(e => e.id === finalEv.id);
@@ -638,12 +656,27 @@ function AppInner() {
         ))}
       </nav>
 
-      <main className={view === "calendario" ? "max-w-5xl mx-auto px-5 py-6" : "max-w-3xl mx-auto px-5 py-6"}>
+      <main className={(view === "calendario" || view === "planillaSalones") ? "max-w-5xl mx-auto px-5 py-6" : "max-w-3xl mx-auto px-5 py-6"}>
         {view === "calendario" && (
-          <MonthView year={year} month={month} events={events}
+          <>
+            <div className="no-print flex justify-end mb-2">
+              <button onClick={() => setView("planillaSalones")} className="text-xs px-3 py-1.5 rounded" style={{ border: `1px solid ${LINE}`, color: MUTED, fontFamily: FONT_BODY }}>
+                🖨️ Imprimir planilla de salones (para el personal)
+              </button>
+            </div>
+            <MonthView year={year} month={month} events={events}
+              onPrev={() => { if (month === 0) { setMonth(11); setYear(y => y - 1); } else setMonth(m => m - 1); }}
+              onNext={() => { if (month === 11) { setMonth(0); setYear(y => y + 1); } else setMonth(m => m + 1); }}
+              onDayClick={(iso) => { setDiaSeleccionado(fromISO(iso)); setView("dia"); }}
+            />
+          </>
+        )}
+
+        {view === "planillaSalones" && (
+          <MonthPrintSalones year={year} month={month} events={events}
             onPrev={() => { if (month === 0) { setMonth(11); setYear(y => y - 1); } else setMonth(m => m - 1); }}
             onNext={() => { if (month === 11) { setMonth(0); setYear(y => y + 1); } else setMonth(m => m + 1); }}
-            onDayClick={(iso) => { setDiaSeleccionado(fromISO(iso)); setView("dia"); }}
+            onBack={() => setView("calendario")}
           />
         )}
 
@@ -754,6 +787,7 @@ function AppInner() {
             floorplans={floorplans} setFloorplans={setFloorplans}
             events={events} onImportEvents={(nuevos) => setEvents(prev => [...prev, ...nuevos])}
             onMarkPastAsPaid={handleMarkPastAsPaid}
+            condicionesContratacion={condicionesContratacion} setCondicionesContratacion={setCondicionesContratacion}
           />
         )}
       </main>

@@ -306,14 +306,24 @@ export function PlanoEditor({ salon, nombreEvento, fecha, plantilla, dibujoInici
 
   const [subiendo, setSubiendo] = useState(false);
   const guardar = async () => {
-    const dataUrl = canvasRef.current.toDataURL("image/png");
     setSubiendo(true);
     try {
+      // Si la plantilla de fondo se cargó desde otro dominio (Storage de
+      // Supabase) sin permiso explícito del navegador, esta línea tira un
+      // error de seguridad y, antes, se colaba sin capturar: el botón
+      // "Guardar" no hacía nada y quedaba la sensación de que el plano
+      // "se guardó" pero después no estaba. Ahora queda adentro del try,
+      // así cualquier error (este u otro) se avisa en vez de morir en
+      // silencio.
+      const dataUrl = canvasRef.current.toDataURL("image/png");
       await onGuardar(dataUrl, notas);
       setGuardado(true);
       setTimeout(() => setGuardado(false), 1500);
-    } catch {
-      // El aviso de error ya lo muestra onGuardar (toast); acá no hace falta duplicarlo.
+    } catch (err) {
+      if (err && err.name === "SecurityError") {
+        alert("No se pudo guardar el dibujo: la imagen de fondo no cargó con los permisos necesarios. Recargá la página y volvé a intentar; si sigue pasando, avisale a Claude.");
+      }
+      // Si no es SecurityError, el aviso de error ya lo muestra onGuardar (toast).
     } finally {
       setSubiendo(false);
     }
@@ -322,21 +332,27 @@ export function PlanoEditor({ salon, nombreEvento, fecha, plantilla, dibujoInici
   // Descarga el plano actual (base + lo dibujado) como archivo .jpg,
   // para compartirlo por WhatsApp, imprimirlo aparte, etc.
   const descargarJPG = () => {
-    const origen = canvasRef.current;
-    // JPG no soporta transparencia: se vuelca todo sobre un fondo blanco primero.
-    const temp = document.createElement("canvas");
-    temp.width = origen.width;
-    temp.height = origen.height;
-    const ctx = temp.getContext("2d");
-    ctx.fillStyle = "#FFFFFF";
-    ctx.fillRect(0, 0, temp.width, temp.height);
-    ctx.drawImage(origen, 0, 0);
-    const link = document.createElement("a");
-    const nombreSalon = (salon || "salon").toLowerCase().replace(/[^a-z0-9]+/g, "-");
-    const nombreEv = (nombreEvento || "").toLowerCase().replace(/[^a-z0-9]+/g, "-");
-    link.download = nombreEv ? `plano-${nombreSalon}-${nombreEv}.jpg` : `plano-${nombreSalon}.jpg`;
-    link.href = temp.toDataURL("image/jpeg", 0.92);
-    link.click();
+    try {
+      const origen = canvasRef.current;
+      // JPG no soporta transparencia: se vuelca todo sobre un fondo blanco primero.
+      const temp = document.createElement("canvas");
+      temp.width = origen.width;
+      temp.height = origen.height;
+      const ctx = temp.getContext("2d");
+      ctx.fillStyle = "#FFFFFF";
+      ctx.fillRect(0, 0, temp.width, temp.height);
+      ctx.drawImage(origen, 0, 0);
+      const link = document.createElement("a");
+      const nombreSalon = (salon || "salon").toLowerCase().replace(/[^a-z0-9]+/g, "-");
+      const nombreEv = (nombreEvento || "").toLowerCase().replace(/[^a-z0-9]+/g, "-");
+      link.download = nombreEv ? `plano-${nombreSalon}-${nombreEv}.jpg` : `plano-${nombreSalon}.jpg`;
+      link.href = temp.toDataURL("image/jpeg", 0.92);
+      link.click();
+    } catch (err) {
+      if (err && err.name === "SecurityError") {
+        alert("No se pudo descargar la imagen: la imagen de fondo no cargó con los permisos necesarios. Recargá la página y volvé a intentar.");
+      }
+    }
   };
 
   if (!plantilla) {

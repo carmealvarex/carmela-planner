@@ -83,6 +83,14 @@ function AppInner() {
   const eventosUpdatedAtRef = useRef(null);
   const planosUpdatedAtRef = useRef(null);
   const presupuestosUpdatedAtRef = useRef(null);
+  // Cuando un cambio llega DESDE afuera (tiempo real u otra pestaña resolviendo
+  // un conflicto), estos refs avisan al efecto de autoguardado que no hace
+  // falta volver a guardar lo que acabamos de recibir. Sin esto, dos pestañas
+  // abiertas a la vez podían quedar "rebotándose" guardados entre sí sin
+  // parar — que es justo el cartel de conflicto apareciendo todo el tiempo.
+  const eventosSkipSaveRef = useRef(false);
+  const planosSkipSaveRef = useRef(false);
+  const presupuestosSkipSaveRef = useRef(false);
 
   const alertas = useMemo(() => {
     const lista = [];
@@ -191,12 +199,14 @@ function AppInner() {
             // Si la marca de tiempo es la misma que la nuestra, es el eco de
             // nuestro propio guardado: no hace falta hacer nada.
             if (fila.updated_at === eventosUpdatedAtRef.current) return;
+            eventosSkipSaveRef.current = true;
             setEvents(fila.value || []);
             eventosUpdatedAtRef.current = fila.updated_at;
             prevEventsCountRef.current = (fila.value || []).length;
             break;
           case "planos":
             if (fila.updated_at === planosUpdatedAtRef.current) return;
+            planosSkipSaveRef.current = true;
             setFloorplans(fila.value || {});
             planosUpdatedAtRef.current = fila.updated_at;
             break;
@@ -211,6 +221,7 @@ function AppInner() {
             break;
           case "presupuestos":
             if (fila.updated_at === presupuestosUpdatedAtRef.current) return;
+            presupuestosSkipSaveRef.current = true;
             setPresupuestos(fila.value || []);
             presupuestosUpdatedAtRef.current = fila.updated_at;
             break;
@@ -296,6 +307,10 @@ function AppInner() {
 
   useEffect(() => {
     if (!ready) return;
+    // Si este cambio llegó por tiempo real (u otra pestaña resolviendo un
+    // conflicto) no lo volvemos a guardar: ya está guardado, es de donde
+    // vino. Guardarlo de nuevo es lo que generaba el "rebote" entre pestañas.
+    if (eventosSkipSaveRef.current) { eventosSkipSaveRef.current = false; return; }
     // Traba de seguridad: si antes había eventos guardados y ahora el
     // array está vacío, es mucho más probable que sea un bug (carga
     // fallida, estado pisado, etc.) que un vaciado intencional — nadie
@@ -324,6 +339,7 @@ function AppInner() {
         // servidor y avisamos, para que puedas volver a aplicar tu cambio.
         const fresh = await loadShared("eventos", events);
         if (fresh.ok) {
+          eventosSkipSaveRef.current = true;
           setEvents(fresh.value);
           eventosUpdatedAtRef.current = fresh.updatedAt;
           prevEventsCountRef.current = (fresh.value || []).length;
@@ -339,6 +355,7 @@ function AppInner() {
   useEffect(() => { if (ready) { const t = setTimeout(() => saveShared("condicionesContratacion", condicionesContratacion), 900); return () => clearTimeout(t); } }, [condicionesContratacion, ready]);
   useEffect(() => {
     if (!ready) return;
+    if (planosSkipSaveRef.current) { planosSkipSaveRef.current = false; return; }
     const t = setTimeout(async () => {
       const res = await saveShared("planos", floorplans, planosUpdatedAtRef.current);
       if (!res.ok) {
@@ -351,6 +368,7 @@ function AppInner() {
         // la versión más nueva y avisamos.
         const fresh = await loadShared("planos", floorplans);
         if (fresh.ok) {
+          planosSkipSaveRef.current = true;
           setFloorplans(fresh.value);
           planosUpdatedAtRef.current = fresh.updatedAt;
           showToast("⚠️ Otra computadora guardó un plano justo antes que vos — se actualizó con esa versión. Si tu plano no quedó, volvé a armarlo y guardarlo.");
@@ -368,6 +386,7 @@ function AppInner() {
   useEffect(() => { if (ready) { const t = setTimeout(() => saveShared("alertasPospuestas", alertasPospuestas), 900); return () => clearTimeout(t); } }, [alertasPospuestas, ready]);
   useEffect(() => {
     if (!ready) return;
+    if (presupuestosSkipSaveRef.current) { presupuestosSkipSaveRef.current = false; return; }
     const t = setTimeout(async () => {
       const res = await saveShared("presupuestos", presupuestos, presupuestosUpdatedAtRef.current);
       if (!res.ok) {
@@ -381,6 +400,7 @@ function AppInner() {
         // más nueva y avisamos.
         const fresh = await loadShared("presupuestos", presupuestos);
         if (fresh.ok) {
+          presupuestosSkipSaveRef.current = true;
           setPresupuestos(fresh.value);
           presupuestosUpdatedAtRef.current = fresh.updatedAt;
           showToast("⚠️ Otra pestaña/compu guardó presupuestos justo antes que vos — se actualizó con esa versión. Si tu último cambio no quedó, volvé a hacerlo.");

@@ -2,9 +2,9 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { loadShared, saveShared, supabase, uploadFile, esDataUrl } from "./lib/supabaseStorage.js";
 import { ConfirmProvider, useConfirm } from "./components/ConfirmDialog.jsx";
 import { ACCENT, CARD, FONT_BODY, FONT_HEAD, FONT_IMPORT, INK, INK_SOFT, LINE, MUTED, PAPER, PARCIAL, PARCIAL_BG, PENDIENTE, PENDIENTE_BG, formatValeNumero } from "./constants.js";
-import { diasHasta, fromISO, mondayOf, toISO } from "./utils/helpers.js";
+import { diasHasta, fromISO, mondayOf, toISO, uid } from "./utils/helpers.js";
 import { blankEvent } from "./utils/eventHelpers.js";
-import { LogoCA } from "./components/common.jsx";
+import { LogoCA, inputStyle } from "./components/common.jsx";
 import { RoleGate } from "./components/RoleGate.jsx";
 import { MonthView, WeekView, DayView, MonthPrintSalones } from "./components/CalendarViews.jsx";
 import { EventForm } from "./components/EventForm.jsx";
@@ -15,6 +15,97 @@ import { PlanoEditor } from "./components/ImportPlano.jsx";
 import { Stats, BuscadorEventos } from "./components/StatsBuscadores.jsx";
 import { ListaPresupuestos, PresupuestoForm, PresupuestoDocumento } from "./components/Presupuesto.jsx";
 import { Settings } from "./components/Settings.jsx";
+
+/* ============================================================
+   RECORDATORIOS — solapa dedicada, al lado de Mes/Semana/Día.
+
+   Junta en un solo lugar los mismos avisos que ya aparecían en la
+   campanita (pagos pendientes + recordatorios cargados adentro de cada
+   evento) y le suma la posibilidad de agregar recordatorios sueltos,
+   sin depender de ningún evento — para cosas tipo "avisame tal día que
+   me dijo mi jefe tal cosa". La campanita se deja como estaba (no se
+   toca ni se saca), así no se pierde nada de lo que ya funcionaba.
+   ============================================================ */
+function RecordatoriosView({ alertas, posponerAlerta, posponerHastaManana, setAlertasOcultas, setSelectedEvent, setView, recordatoriosGenerales, setRecordatoriosGenerales }) {
+  const [texto, setTexto] = useState("");
+  const [fecha, setFecha] = useState("");
+
+  const agregar = () => {
+    if (!texto.trim() || !fecha) return;
+    setRecordatoriosGenerales(prev => [...prev, { id: uid(), texto: texto.trim(), fecha: new Date(fecha).toISOString() }]);
+    setTexto(""); setFecha("");
+  };
+  const eliminar = (id) => setRecordatoriosGenerales(prev => prev.filter(r => r.id !== id));
+
+  const ahora = Date.now();
+  const proximos = recordatoriosGenerales
+    .filter(r => new Date(r.fecha).getTime() > ahora)
+    .sort((a, b) => new Date(a.fecha) - new Date(b.fecha));
+
+  return (
+    <div>
+      <h2 style={{ fontFamily: FONT_HEAD, fontSize: 26, color: INK, marginBottom: 16 }}>Recordatorios</h2>
+
+      <div className="p-4 rounded mb-6" style={{ background: CARD, border: `1px solid ${LINE}` }}>
+        <p style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK, fontWeight: 600, marginBottom: 10 }}>Agregar recordatorio</p>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <input value={texto} onChange={e => setTexto(e.target.value)} placeholder="¿Qué te tengo que recordar?" style={{ ...inputStyle, flex: 1 }} />
+          <input type="datetime-local" value={fecha} onChange={e => setFecha(e.target.value)} style={inputStyle} />
+          <button onClick={agregar} className="px-4 py-2 rounded text-sm font-medium" style={{ background: ACCENT, color: PAPER, fontFamily: FONT_BODY }}>Agregar</button>
+        </div>
+        <p style={{ fontFamily: FONT_BODY, fontSize: 11.5, color: MUTED, marginTop: 8 }}>
+          Se va a mostrar como "pendiente" (abajo) a partir de la fecha y hora que elijas, hasta que lo descartes o lo pospongas — igual que los avisos de eventos.
+        </p>
+      </div>
+
+      <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: MUTED, marginBottom: 10 }}>
+        Pendientes ahora {alertas.length > 0 ? `(${alertas.length})` : ""}
+      </p>
+      {alertas.length === 0 ? (
+        <p style={{ fontFamily: FONT_BODY, fontSize: 13, color: MUTED, marginBottom: 28 }}>No hay nada pendiente por ahora.</p>
+      ) : (
+        <div className="flex flex-col gap-2 mb-8">
+          {alertas.map(a => (
+            <div key={a.id} className="p-3 rounded" style={{ background: a.urgente ? PENDIENTE_BG : PARCIAL_BG, border: `1px solid ${a.urgente ? PENDIENTE : PARCIAL}` }}>
+              <button
+                onClick={() => { if (a.ev) { setSelectedEvent(a.ev); setView("ficha"); } }}
+                className="text-left w-full"
+                style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK, background: "none", border: "none", cursor: a.ev ? "pointer" : "default" }}
+              >
+                {a.texto}
+              </button>
+              <div className="flex items-center gap-1.5 flex-wrap mt-2">
+                {a.id.startsWith("pago-") && (
+                  <span style={{ fontFamily: FONT_BODY, fontSize: 11, color: MUTED }}>Marcalo pagado desde la ficha del evento.</span>
+                )}
+                <button onClick={() => posponerAlerta(a.id, 1)} className="text-xs px-2 py-0.5 rounded" style={{ fontFamily: FONT_BODY, color: INK, border: `1px solid ${LINE}`, background: CARD }}>En 1 hora</button>
+                <button onClick={() => posponerHastaManana(a.id)} className="text-xs px-2 py-0.5 rounded" style={{ fontFamily: FONT_BODY, color: INK, border: `1px solid ${LINE}`, background: CARD }}>Mañana</button>
+                <button onClick={() => setAlertasOcultas(prev => [...prev, a.id])} className="text-xs px-2 py-0.5 rounded ml-auto" style={{ fontFamily: FONT_BODY, color: MUTED, border: "none", background: "none", cursor: "pointer" }}>Descartar</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <p style={{ fontFamily: FONT_BODY, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: MUTED, marginBottom: 10 }}>Próximos (todavía no llegó la fecha)</p>
+      {proximos.length === 0 ? (
+        <p style={{ fontFamily: FONT_BODY, fontSize: 13, color: MUTED }}>No tenés recordatorios sueltos programados a futuro.</p>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {proximos.map(r => (
+            <div key={r.id} className="p-3 rounded flex items-center justify-between gap-2" style={{ background: CARD, border: `1px solid ${LINE}` }}>
+              <div>
+                <p style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK }}>{r.texto}</p>
+                <p style={{ fontFamily: FONT_BODY, fontSize: 11.5, color: MUTED }}>{new Date(r.fecha).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}</p>
+              </div>
+              <button onClick={() => eliminar(r.id)} className="text-xs px-2 py-1 rounded" style={{ fontFamily: FONT_BODY, color: PENDIENTE, border: `1px solid ${LINE}`, background: CARD, whiteSpace: "nowrap" }}>Eliminar</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function App() {
   return (
@@ -50,6 +141,11 @@ function AppInner() {
   const [presupuestos, setPresupuestos] = useState([]);
   const [presupuestoSeleccionado, setPresupuestoSeleccionado] = useState(null);
   const [presupuestoEditando, setPresupuestoEditando] = useState(null);
+  // Recordatorios sueltos, no atados a ningún evento (por ej. "avisame tal
+  // día que me dijo mi jefe tal cosa"). Se cargan desde la solapa
+  // Recordatorios y aparecen junto con los avisos de eventos, tanto ahí
+  // como en la campanita.
+  const [recordatoriosGenerales, setRecordatoriosGenerales] = useState([]);
   const [view, setView] = useState("calendario");
   const [year, setYear] = useState(new Date().getFullYear());
   const [month, setMonth] = useState(new Date().getMonth());
@@ -122,12 +218,20 @@ function AppInner() {
         }
       });
     });
+    // Recordatorios sueltos (no atados a ningún evento): aparecen a partir
+    // de la fecha/hora que se les puso, hasta que se descarten o pospongan.
+    recordatoriosGenerales.forEach(r => {
+      if (!r.fecha) return;
+      if (new Date(r.fecha).getTime() <= Date.now()) {
+        lista.push({ id: `gen-${r.id}`, ev: null, urgente: true, texto: r.texto });
+      }
+    });
     const ahora = Date.now();
     return lista
       .filter(a => !alertasOcultas.includes(a.id))
       .filter(a => !(alertasPospuestas[a.id] && new Date(alertasPospuestas[a.id]).getTime() > ahora))
       .sort((a, b) => (a.urgente === b.urgente ? 0 : a.urgente ? -1 : 1));
-  }, [events, alertasOcultas, alertasPospuestas]);
+  }, [events, alertasOcultas, alertasPospuestas, recordatoriosGenerales]);
 
   // Posponer una notificación: vuelve a aparecer sola pasadas las horas indicadas.
   const posponerAlerta = (id, horas) => {
@@ -144,7 +248,7 @@ function AppInner() {
 
   useEffect(() => {
     (async () => {
-      const [ev, jefe, cfg, planos, tar, ocultas, pospuestas, presu, condiciones] = await Promise.all([
+      const [ev, jefe, cfg, planos, tar, ocultas, pospuestas, presu, condiciones, recGenerales] = await Promise.all([
         loadShared("eventos", []),
         loadShared("jefeAreas", { telefono: "" }),
         loadShared("config", { pin: null, proximoVale: 1, proximoVoucher: 1, proximoFicha: 1, proximoComanda: 1 }),
@@ -154,12 +258,13 @@ function AppInner() {
         loadShared("alertasPospuestas", {}),
         loadShared("presupuestos", []),
         loadShared("condicionesContratacion", ""),
+        loadShared("recordatoriosGenerales", []),
       ]);
 
       // Si CUALQUIERA de estas cargas falló (red, timeout, etc.), NO seguimos:
       // no activamos "ready", así los efectos de autoguardado no se disparan
       // y no hay riesgo de pisar datos reales con los valores de fallback.
-      const huboFallos = [ev, jefe, cfg, planos, tar, ocultas, pospuestas, presu, condiciones].some(r => !r.ok);
+      const huboFallos = [ev, jefe, cfg, planos, tar, ocultas, pospuestas, presu, condiciones, recGenerales].some(r => !r.ok);
       if (huboFallos) {
         console.error("Fallo la carga inicial de al menos una clave, se aborta para no sobrescribir datos.");
         setLoadError(true);
@@ -170,6 +275,7 @@ function AppInner() {
       setProximoVoucher(cfg.value.proximoVoucher || 1); setProximoFicha(cfg.value.proximoFicha || 1); setProximoComanda(cfg.value.proximoComanda || 1);
       setFloorplans(planos.value); setTarifas(tar.value); setAlertasOcultas(ocultas.value); setAlertasPospuestas(pospuestas.value); setPresupuestos(presu.value);
       setCondicionesContratacion(condiciones.value || "");
+      setRecordatoriosGenerales(recGenerales.value || []);
       prevEventsCountRef.current = (ev.value || []).length;
       eventosUpdatedAtRef.current = ev.updatedAt;
       planosUpdatedAtRef.current = planos.updatedAt;
@@ -218,6 +324,9 @@ function AppInner() {
             break;
           case "condicionesContratacion":
             setCondicionesContratacion(fila.value || "");
+            break;
+          case "recordatoriosGenerales":
+            setRecordatoriosGenerales(fila.value || []);
             break;
           case "presupuestos":
             if (fila.updated_at === presupuestosUpdatedAtRef.current) return;
@@ -322,10 +431,10 @@ function AppInner() {
     }
     prevEventsCountRef.current = events.length;
 
-    // Debounce: si vas tipeando o cambiando varias cosas seguidas, esperamos
-    // a que hagas una pausa de casi 1 segundo antes de guardar, en vez de
-    // mandar un guardado a Supabase por cada letra. Esto también reduce
-    // mucho las demoras al usar la app.
+    // Como acá el evento entero se guarda de una sola vez (al tocar
+    // "Guardar" en el formulario, no letra por letra), no hace falta
+    // esperar casi 1 segundo: con una pausa mínima alcanza para agrupar
+    // guardados que caen justo en el mismo instante.
     const t = setTimeout(async () => {
       const res = await saveShared("eventos", events, eventosUpdatedAtRef.current);
       if (!res.ok) {
@@ -348,11 +457,12 @@ function AppInner() {
         return;
       }
       eventosUpdatedAtRef.current = res.updatedAt;
-    }, 900);
+    }, 150);
     return () => clearTimeout(t);
   }, [events, ready]);
   useEffect(() => { if (ready) { const t = setTimeout(() => saveShared("jefeAreas", jefeAreas), 900); return () => clearTimeout(t); } }, [jefeAreas, ready]);
   useEffect(() => { if (ready) { const t = setTimeout(() => saveShared("condicionesContratacion", condicionesContratacion), 900); return () => clearTimeout(t); } }, [condicionesContratacion, ready]);
+  useEffect(() => { if (ready) { const t = setTimeout(() => saveShared("recordatoriosGenerales", recordatoriosGenerales), 900); return () => clearTimeout(t); } }, [recordatoriosGenerales, ready]);
   useEffect(() => {
     if (!ready) return;
     if (planosSkipSaveRef.current) { planosSkipSaveRef.current = false; return; }
@@ -376,7 +486,7 @@ function AppInner() {
         return;
       }
       planosUpdatedAtRef.current = res.updatedAt;
-    }, 900);
+    }, 150);
     return () => clearTimeout(t);
   }, [floorplans, ready]);
   useEffect(() => { if (ready) { const t = setTimeout(() => saveShared("tarifas", tarifas), 900); return () => clearTimeout(t); } }, [tarifas, ready]);
@@ -408,7 +518,7 @@ function AppInner() {
         return;
       }
       presupuestosUpdatedAtRef.current = res.updatedAt;
-    }, 900);
+    }, 150);
     return () => clearTimeout(t);
   }, [presupuestos, ready]);
 
@@ -666,17 +776,38 @@ function AppInner() {
 
       <nav className="no-print px-5 py-3 flex gap-4 flex-wrap" style={{ background: CARD, borderBottom: `1px solid ${LINE}` }}>
         {(isAdmin
-          ? [["calendario", "Mes"], ["semana", "Semana"], ["dia", "Día"], ["buscar", "Buscar"], ["estadisticas", "Estadísticas"], ["presupuesto", "Presupuesto"], ["ajustes", "Ajustes"]]
+          ? [["calendario", "Mes"], ["semana", "Semana"], ["dia", "Día"], ["recordatorios", "Recordatorios"], ["buscar", "Buscar"], ["estadisticas", "Estadísticas"], ["presupuesto", "Presupuesto"], ["ajustes", "Ajustes"]]
           : [["calendario", "Mes"], ["semana", "Semana"], ["dia", "Día"], ["buscar", "Buscar"], ["estadisticas", "Estadísticas"]]
         ).map(([key, label]) => (
           <button key={key} onClick={() => setView(key)} className="text-sm font-medium pb-1"
             style={{ fontFamily: FONT_BODY, color: (view === key || (key === "presupuesto" && ["presupuestoForm", "presupuestoDoc"].includes(view))) ? INK : MUTED, borderBottom: (view === key || (key === "presupuesto" && ["presupuestoForm", "presupuestoDoc"].includes(view))) ? `2px solid ${ACCENT}` : "2px solid transparent" }}>
             {label}
+            {key === "recordatorios" && alertas.length > 0 && (
+              <span style={{
+                display: "inline-flex", alignItems: "center", justifyContent: "center",
+                marginLeft: 6, background: PENDIENTE, color: "#fff", borderRadius: "50%",
+                fontSize: 10, minWidth: 16, height: 16, padding: "0 3px", fontFamily: FONT_BODY,
+              }}>
+                {alertas.length}
+              </span>
+            )}
           </button>
         ))}
       </nav>
 
       <main className={(view === "calendario" || view === "planillaSalones") ? "max-w-5xl mx-auto px-5 py-6" : "max-w-3xl mx-auto px-5 py-6"}>
+        {view === "recordatorios" && isAdmin && (
+          <RecordatoriosView
+            alertas={alertas}
+            posponerAlerta={posponerAlerta}
+            posponerHastaManana={posponerHastaManana}
+            setAlertasOcultas={setAlertasOcultas}
+            setSelectedEvent={setSelectedEvent}
+            setView={setView}
+            recordatoriosGenerales={recordatoriosGenerales}
+            setRecordatoriosGenerales={setRecordatoriosGenerales}
+          />
+        )}
         {view === "calendario" && (
           <>
             <div className="no-print flex justify-end mb-2">

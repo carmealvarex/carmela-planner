@@ -355,6 +355,55 @@ export function PlanoEditor({ salon, nombreEvento, fecha, plantilla, dibujoInici
     }
   };
 
+  // Igual que descargarJPG, pero metido en una hoja A4 (con márgenes reales),
+  // para cuando lo que se necesita es un documento con tamaño de hoja fijo
+  // y no una imagen suelta.
+  const [generandoPDFPlano, setGenerandoPDFPlano] = useState(false);
+  const descargarPDF = async () => {
+    try {
+      const origen = canvasRef.current;
+      const temp = document.createElement("canvas");
+      temp.width = origen.width;
+      temp.height = origen.height;
+      const ctx = temp.getContext("2d");
+      ctx.fillStyle = "#FFFFFF";
+      ctx.fillRect(0, 0, temp.width, temp.height);
+      ctx.drawImage(origen, 0, 0);
+      const dataUrl = temp.toDataURL("image/jpeg", 0.95);
+
+      setGenerandoPDFPlano(true);
+      const { jsPDF } = await import("jspdf");
+      // Los planos suelen ser más anchos que altos: elegimos orientación
+      // según la forma del dibujo, para que ocupe la hoja lo mejor posible.
+      const orientation = temp.width >= temp.height ? "landscape" : "portrait";
+      const pdf = new jsPDF({ orientation, unit: "mm", format: "a4" });
+      const margenMM = 12;
+      const anchoUtilMM = pdf.internal.pageSize.getWidth() - margenMM * 2;
+      const altoUtilMM = pdf.internal.pageSize.getHeight() - margenMM * 2;
+      // Se escala el dibujo para que entre completo en la hoja (sin recortar
+      // ni deformar), centrado dentro del margen útil.
+      const escala = Math.min(anchoUtilMM / temp.width, altoUtilMM / temp.height);
+      const anchoFinalMM = temp.width * escala;
+      const altoFinalMM = temp.height * escala;
+      const x = margenMM + (anchoUtilMM - anchoFinalMM) / 2;
+      const y = margenMM + (altoUtilMM - altoFinalMM) / 2;
+      pdf.addImage(dataUrl, "JPEG", x, y, anchoFinalMM, altoFinalMM);
+
+      const nombreSalon = (salon || "salon").toLowerCase().replace(/[^a-z0-9]+/g, "-");
+      const nombreEv = (nombreEvento || "").toLowerCase().replace(/[^a-z0-9]+/g, "-");
+      pdf.save(nombreEv ? `plano-${nombreSalon}-${nombreEv}.pdf` : `plano-${nombreSalon}.pdf`);
+    } catch (err) {
+      if (err && err.name === "SecurityError") {
+        alert("No se pudo generar el PDF: la imagen de fondo no cargó con los permisos necesarios. Recargá la página y volvé a intentar.");
+      } else {
+        alert("No se pudo generar el PDF. Verificá que el paquete 'jspdf' esté instalado (npm install jspdf).");
+        console.error(err);
+      }
+    } finally {
+      setGenerandoPDFPlano(false);
+    }
+  };
+
   if (!plantilla) {
     return (
       <div>
@@ -373,6 +422,9 @@ export function PlanoEditor({ salon, nombreEvento, fecha, plantilla, dibujoInici
       <div className="no-print flex gap-2 mb-3 flex-wrap items-center">
         <button onClick={() => window.print()} className="px-4 py-2 rounded text-sm font-medium" style={{ background: INK_SOFT, color: PAPER, fontFamily: FONT_BODY }}>Imprimir plano</button>
         <button onClick={descargarJPG} className="px-4 py-2 rounded text-sm font-medium" style={{ border: `1px solid ${LINE}`, color: INK, fontFamily: FONT_BODY }}>Descargar en JPG</button>
+        <button onClick={descargarPDF} disabled={generandoPDFPlano} className="px-4 py-2 rounded text-sm font-medium" style={{ border: `1px solid ${ACCENT}`, color: ACCENT, fontFamily: FONT_BODY, opacity: generandoPDFPlano ? 0.6 : 1 }}>
+          {generandoPDFPlano ? "Generando…" : "Descargar en PDF (A4)"}
+        </button>
         {isAdmin && (
           <button onClick={guardar} disabled={subiendo} className="px-4 py-2 rounded text-sm font-medium" style={{ background: PAGADO, color: PAPER, fontFamily: FONT_BODY, opacity: subiendo ? 0.6 : 1 }}>
             {subiendo ? "Subiendo…" : guardado ? "¡Guardado!" : "Guardar dibujo del evento"}

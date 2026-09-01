@@ -45,9 +45,37 @@ export function Voucher({ ev, onBack }) {
       const html2canvas = (await import("html2canvas")).default;
       const { jsPDF } = await import("jspdf");
       const canvas = await html2canvas(voucherRef.current, { scale: 2, backgroundColor: "#ffffff", useCORS: true });
-      const imgData = canvas.toDataURL("image/jpeg", 0.95);
-      const pdf = new jsPDF({ orientation: canvas.width >= canvas.height ? "landscape" : "portrait", unit: "px", format: [canvas.width, canvas.height] });
-      pdf.addImage(imgData, "JPEG", 0, 0, canvas.width, canvas.height);
+
+      // Hoja A4 estándar (no "a medida" del contenido), igual que en la ficha.
+      // Si el contenido no entra en una sola hoja, se parte en las páginas que hagan falta.
+      const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+      const margenMM = 12;
+      const anchoUtilMM = pdf.internal.pageSize.getWidth() - margenMM * 2;
+      const altoUtilMM = pdf.internal.pageSize.getHeight() - margenMM * 2;
+      const pxPorMM = canvas.width / anchoUtilMM;
+      const altoPaginaPx = Math.floor(altoUtilMM * pxPorMM);
+
+      let renderedPx = 0;
+      let primeraPagina = true;
+      while (renderedPx < canvas.height) {
+        const alturaSlicePx = Math.min(altoPaginaPx, canvas.height - renderedPx);
+        const sliceCanvas = document.createElement("canvas");
+        sliceCanvas.width = canvas.width;
+        sliceCanvas.height = alturaSlicePx;
+        const ctx = sliceCanvas.getContext("2d");
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, sliceCanvas.width, sliceCanvas.height);
+        ctx.drawImage(canvas, 0, renderedPx, canvas.width, alturaSlicePx, 0, 0, canvas.width, alturaSlicePx);
+        const sliceData = sliceCanvas.toDataURL("image/jpeg", 0.95);
+        const alturaSliceMM = alturaSlicePx / pxPorMM;
+
+        if (!primeraPagina) pdf.addPage();
+        pdf.addImage(sliceData, "JPEG", margenMM, margenMM, anchoUtilMM, alturaSliceMM);
+
+        renderedPx += alturaSlicePx;
+        primeraPagina = false;
+      }
+
       pdf.save(`${nombreVoucher()}.pdf`);
     } catch (err) {
       alert("No se pudo generar el PDF. Verificá que el paquete 'jspdf' esté instalado (npm install jspdf).");
@@ -191,9 +219,35 @@ export function Vale({ ev, onBack }) {
       const html2canvas = (await import("html2canvas")).default;
       const { jsPDF } = await import("jspdf");
       const canvas = await html2canvas(valeRef.current, { scale: 2, backgroundColor: "#ffffff", useCORS: true });
-      const imgData = canvas.toDataURL("image/jpeg", 0.95);
-      const pdf = new jsPDF({ orientation: canvas.width >= canvas.height ? "landscape" : "portrait", unit: "px", format: [canvas.width, canvas.height] });
-      pdf.addImage(imgData, "JPEG", 0, 0, canvas.width, canvas.height);
+
+      const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+      const margenMM = 12;
+      const anchoUtilMM = pdf.internal.pageSize.getWidth() - margenMM * 2;
+      const altoUtilMM = pdf.internal.pageSize.getHeight() - margenMM * 2;
+      const pxPorMM = canvas.width / anchoUtilMM;
+      const altoPaginaPx = Math.floor(altoUtilMM * pxPorMM);
+
+      let renderedPx = 0;
+      let primeraPagina = true;
+      while (renderedPx < canvas.height) {
+        const alturaSlicePx = Math.min(altoPaginaPx, canvas.height - renderedPx);
+        const sliceCanvas = document.createElement("canvas");
+        sliceCanvas.width = canvas.width;
+        sliceCanvas.height = alturaSlicePx;
+        const ctx = sliceCanvas.getContext("2d");
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, sliceCanvas.width, sliceCanvas.height);
+        ctx.drawImage(canvas, 0, renderedPx, canvas.width, alturaSlicePx, 0, 0, canvas.width, alturaSlicePx);
+        const sliceData = sliceCanvas.toDataURL("image/jpeg", 0.95);
+        const alturaSliceMM = alturaSlicePx / pxPorMM;
+
+        if (!primeraPagina) pdf.addPage();
+        pdf.addImage(sliceData, "JPEG", margenMM, margenMM, anchoUtilMM, alturaSliceMM);
+
+        renderedPx += alturaSlicePx;
+        primeraPagina = false;
+      }
+
       pdf.save(`${nombreVale()}.pdf`);
     } catch (err) {
       alert("No se pudo generar el PDF. Verificá que el paquete 'jspdf' esté instalado (npm install jspdf).");
@@ -295,9 +349,35 @@ export function Comanda({ ev, onBack }) {
       const html2canvas = (await import("html2canvas")).default;
       const { jsPDF } = await import("jspdf");
       const canvas = await html2canvas(comandaRef.current, { scale: 2, backgroundColor: "#ffffff", useCORS: true });
-      const imgData = canvas.toDataURL("image/jpeg", 0.95);
-      const pdf = new jsPDF({ orientation: canvas.width >= canvas.height ? "landscape" : "portrait", unit: "px", format: [canvas.width, canvas.height] });
-      pdf.addImage(imgData, "JPEG", 0, 0, canvas.width, canvas.height);
+
+      const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+      const margenMM = 12;
+      const anchoUtilMM = pdf.internal.pageSize.getWidth() - margenMM * 2;
+      const altoUtilMM = pdf.internal.pageSize.getHeight() - margenMM * 2;
+      const pxPorMM = canvas.width / anchoUtilMM;
+      const altoPaginaPx = Math.floor(altoUtilMM * pxPorMM);
+
+      let renderedPx = 0;
+      let primeraPagina = true;
+      while (renderedPx < canvas.height) {
+        const alturaSlicePx = Math.min(altoPaginaPx, canvas.height - renderedPx);
+        const sliceCanvas = document.createElement("canvas");
+        sliceCanvas.width = canvas.width;
+        sliceCanvas.height = alturaSlicePx;
+        const ctx = sliceCanvas.getContext("2d");
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, sliceCanvas.width, sliceCanvas.height);
+        ctx.drawImage(canvas, 0, renderedPx, canvas.width, alturaSlicePx, 0, 0, canvas.width, alturaSlicePx);
+        const sliceData = sliceCanvas.toDataURL("image/jpeg", 0.95);
+        const alturaSliceMM = alturaSlicePx / pxPorMM;
+
+        if (!primeraPagina) pdf.addPage();
+        pdf.addImage(sliceData, "JPEG", margenMM, margenMM, anchoUtilMM, alturaSliceMM);
+
+        renderedPx += alturaSlicePx;
+        primeraPagina = false;
+      }
+
       pdf.save(`${nombreComanda()}.pdf`);
     } catch (err) {
       alert("No se pudo generar el PDF. Verificá que el paquete 'jspdf' esté instalado (npm install jspdf).");

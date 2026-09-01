@@ -655,6 +655,13 @@ function AppInner() {
   return (
     <div style={{ minHeight: "100vh", background: PAPER }}>
       <style>{`${FONT_IMPORT}
+        /* Hoja A4 fija para cualquier "Imprimir" o "Guardar como PDF" desde el
+           navegador (ficha, voucher, vale, comanda, plano, calendario), sin
+           depender del tamaño de papel que tenga configurado la impresora. */
+        @page {
+          size: A4;
+          margin: 12mm;
+        }
         @media print {
           .no-print { display: none !important; }
           body { background: white !important; }

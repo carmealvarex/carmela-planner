@@ -8,11 +8,14 @@ import { Field, LogoCA, LogoHotel, inputStyle } from "./common.jsx";
    los eventos ya confirmados: esto es para mandarle un presupuesto
    a un cliente que todavía no reservó nada).
    ============================================================ */
-const CONDICIONES_DEFAULT = `Para confirmar la reserva de un salón se deberá abonar una seña equivalente al 50% del valor total del evento. La reserva quedará confirmada únicamente una vez acreditado dicho pago. El saldo restante deberá abonarse en su totalidad con 48 horas de anticipación a la realización del evento, sin excepción.
-En caso de suspensión o cancelación, el importe abonado en concepto de seña no será reembolsable en ninguna circunstancia.
-El número final de invitados deberá ser confirmado con 48 horas de anticipación a la fecha del evento. Dicho número será considerado como mínimo garantizado a facturar. En caso de que la cantidad de asistentes supere lo previamente acordado, el excedente será facturado al finalizar el evento, sujeto a disponibilidad operativa.
-Las reprogramaciones de fecha podrán solicitarse con anticipación y estarán sujetas a disponibilidad del hotel.
-No se realizan financiaciones ni se aceptan cheques.`;
+// Versión resumida para el presupuesto (la versión completa se muestra en el
+// Voucher una vez que el evento está confirmado — ver Ajustes → Condiciones
+// de contratación).
+const CONDICIONES_DEFAULT = `Seña del 50% para confirmar la reserva (no reembolsable ante cancelación).
+Saldo restante: 48hs antes del evento, sin excepción.
+Número de invitados a confirmar 48hs antes; se factura como mínimo garantizado.
+No se aceptan cheques ni financiación.
+Condiciones completas disponibles al momento de confirmar la reserva.`;
 
 export function blankPresupuesto() {
   return {
@@ -21,6 +24,7 @@ export function blankPresupuesto() {
     cliente: "",
     fechaEvento: "", lugar: "", invitados: "", formato: "", horario: "",
     incluirLogoHotel: true,
+    incluirFirmas: true, // si este presupuesto también sirve como aceptación/contrato firmado
     precioConIva: true, // true: los valores cargados ya incluyen IVA · false: son valores netos, +IVA aparte
     secciones: [{ id: uid(), titulo: "", cuerpo: "" }],
     items: [],
@@ -123,6 +127,13 @@ export function PresupuestoForm({ initial, onSave, onCancel }) {
         <label className="flex items-center gap-1.5">
           <input type="checkbox" checked={!!p.incluirLogoHotel} onChange={e => set("incluirLogoHotel", e.target.checked)} />
           <span style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK }}>Incluir también el logo de Hotel Argos (tu logo de Carmela Álvarez siempre va)</span>
+        </label>
+      </Field>
+
+      <Field label="Firmas">
+        <label className="flex items-center gap-1.5">
+          <input type="checkbox" checked={p.incluirFirmas !== false} onChange={e => set("incluirFirmas", e.target.checked)} />
+          <span style={{ fontFamily: FONT_BODY, fontSize: 13, color: INK }}>Incluir espacio de firma de ambas partes (destildá si es solo un presupuesto informativo, sin valor de contrato todavía)</span>
         </label>
       </Field>
 
@@ -237,9 +248,38 @@ export function PresupuestoDocumento({ p, onBack, onEdit }) {
       const html2canvas = (await import("html2canvas")).default;
       const { jsPDF } = await import("jspdf");
       const canvas = await html2canvas(ref.current, { scale: 2, backgroundColor: "#ffffff", useCORS: true });
-      const imgData = canvas.toDataURL("image/jpeg", 0.95);
-      const pdf = new jsPDF({ orientation: "portrait", unit: "px", format: [canvas.width, canvas.height] });
-      pdf.addImage(imgData, "JPEG", 0, 0, canvas.width, canvas.height);
+
+      // Hoja A4 estándar, igual que en la ficha/voucher/vale/comanda. Si el
+      // presupuesto es largo (muchos ítems o secciones), se reparte solo en
+      // las páginas que hagan falta.
+      const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+      const margenMM = 12;
+      const anchoUtilMM = pdf.internal.pageSize.getWidth() - margenMM * 2;
+      const altoUtilMM = pdf.internal.pageSize.getHeight() - margenMM * 2;
+      const pxPorMM = canvas.width / anchoUtilMM;
+      const altoPaginaPx = Math.floor(altoUtilMM * pxPorMM);
+
+      let renderedPx = 0;
+      let primeraPagina = true;
+      while (renderedPx < canvas.height) {
+        const alturaSlicePx = Math.min(altoPaginaPx, canvas.height - renderedPx);
+        const sliceCanvas = document.createElement("canvas");
+        sliceCanvas.width = canvas.width;
+        sliceCanvas.height = alturaSlicePx;
+        const ctx = sliceCanvas.getContext("2d");
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, sliceCanvas.width, sliceCanvas.height);
+        ctx.drawImage(canvas, 0, renderedPx, canvas.width, alturaSlicePx, 0, 0, canvas.width, alturaSlicePx);
+        const sliceData = sliceCanvas.toDataURL("image/jpeg", 0.95);
+        const alturaSliceMM = alturaSlicePx / pxPorMM;
+
+        if (!primeraPagina) pdf.addPage();
+        pdf.addImage(sliceData, "JPEG", margenMM, margenMM, anchoUtilMM, alturaSliceMM);
+
+        renderedPx += alturaSlicePx;
+        primeraPagina = false;
+      }
+
       pdf.save(`${nombreArchivo()}.pdf`);
     } catch (err) {
       alert("No se pudo generar el PDF. Verificá que el paquete 'jspdf' esté instalado.");
@@ -342,6 +382,25 @@ export function PresupuestoDocumento({ p, onBack, onEdit }) {
         )}
 
         <p style={{ fontFamily: FONT_BODY, fontSize: 13, fontStyle: "italic", color: INK, marginTop: 24 }}>Quedo a disposición, saludos cordiales.<br />Carmela Alvarez</p>
+
+        {/* Firmas de ambas partes — para cuando este mismo presupuesto se usa
+            como aceptación/contrato firmado, no solo como cotización informativa. */}
+        {p.incluirFirmas !== false && (
+          <div className="flex justify-between items-end gap-8" style={{ marginTop: 56 }}>
+            <div style={{ flex: 1, textAlign: "center" }}>
+              <div style={{ borderTop: `1px solid ${INK}`, paddingTop: 6 }}>
+                <p style={{ fontFamily: FONT_BODY, fontSize: 11.5, color: INK }}>Firma y aclaración — Cliente</p>
+                <p style={{ fontFamily: FONT_BODY, fontSize: 10.5, color: MUTED, marginTop: 2 }}>Aclaración: ____________________________ &nbsp; DNI: ______________</p>
+              </div>
+            </div>
+            <div style={{ flex: 1, textAlign: "center" }}>
+              <div style={{ borderTop: `1px solid ${INK}`, paddingTop: 6 }}>
+                <p style={{ fontFamily: FONT_BODY, fontSize: 11.5, color: INK }}>Firma y aclaración — Hotel Argos</p>
+                <p style={{ fontFamily: FONT_BODY, fontSize: 10.5, color: MUTED, marginTop: 2 }}>Carmela Álvarez</p>
+              </div>
+            </div>
+          </div>
+        )}
 
         {p.incluirLogoHotel && (
           <div className="text-center mt-8 pt-4" style={{ borderTop: `1px solid ${LINE}`, fontFamily: FONT_BODY, fontSize: 10.5, color: MUTED }}>

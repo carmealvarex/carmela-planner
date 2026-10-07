@@ -187,6 +187,21 @@ function AppInner() {
   const eventosSkipSaveRef = useRef(false);
   const planosSkipSaveRef = useRef(false);
   const presupuestosSkipSaveRef = useRef(false);
+  // Recuerda, como texto, lo último que se leyó o se guardó de cada clave.
+  // Sirve para NO volver a guardar cuando en realidad no cambió nada: antes,
+  // cada vez que llegaba un cambio en vivo se volvía a guardar lo mismo, eso
+  // disparaba otro cambio en vivo, y así en círculo sin parar (era lo que
+  // gastaba todo el tráfico de Supabase).
+  const ultimoJsonRef = useRef({});
+  const recordarValor = (key, valor) => { ultimoJsonRef.current[key] = JSON.stringify(valor); };
+  const guardarSiCambio = async (key, valor) => {
+    const json = JSON.stringify(valor);
+    if (ultimoJsonRef.current[key] === json) return;
+    const anterior = ultimoJsonRef.current[key];
+    ultimoJsonRef.current[key] = json;
+    const res = await saveShared(key, valor);
+    if (!res.ok) ultimoJsonRef.current[key] = anterior;
+  };
 
   const alertas = useMemo(() => {
     const lista = [];
@@ -280,6 +295,16 @@ function AppInner() {
       eventosUpdatedAtRef.current = ev.updatedAt;
       planosUpdatedAtRef.current = planos.updatedAt;
       presupuestosUpdatedAtRef.current = presu.updatedAt;
+      // Lo que acabamos de leer ya está guardado: no hace falta volver a guardarlo.
+      recordarValor("eventos", ev.value);
+      recordarValor("jefeAreas", jefe.value);
+      recordarValor("planos", planos.value);
+      recordarValor("tarifas", tar.value);
+      recordarValor("alertasOcultas", ocultas.value);
+      recordarValor("alertasPospuestas", pospuestas.value);
+      recordarValor("presupuestos", presu.value);
+      recordarValor("condicionesContratacion", condiciones.value || "");
+      recordarValor("recordatoriosGenerales", recGenerales.value || []);
       setReady(true);
     })();
   }, []);
@@ -306,6 +331,7 @@ function AppInner() {
             // nuestro propio guardado: no hace falta hacer nada.
             if (fila.updated_at === eventosUpdatedAtRef.current) return;
             eventosSkipSaveRef.current = true;
+            recordarValor("eventos", fila.value || []);
             setEvents(fila.value || []);
             eventosUpdatedAtRef.current = fila.updated_at;
             prevEventsCountRef.current = (fila.value || []).length;
@@ -313,24 +339,30 @@ function AppInner() {
           case "planos":
             if (fila.updated_at === planosUpdatedAtRef.current) return;
             planosSkipSaveRef.current = true;
+            recordarValor("planos", fila.value || {});
             setFloorplans(fila.value || {});
             planosUpdatedAtRef.current = fila.updated_at;
             break;
           case "tarifas":
+            recordarValor("tarifas", fila.value || {});
             setTarifas(fila.value || {});
             break;
           case "jefeAreas":
+            recordarValor("jefeAreas", fila.value || { telefono: "" });
             setJefeAreas(fila.value || { telefono: "" });
             break;
           case "condicionesContratacion":
+            recordarValor("condicionesContratacion", fila.value || "");
             setCondicionesContratacion(fila.value || "");
             break;
           case "recordatoriosGenerales":
+            recordarValor("recordatoriosGenerales", fila.value || []);
             setRecordatoriosGenerales(fila.value || []);
             break;
           case "presupuestos":
             if (fila.updated_at === presupuestosUpdatedAtRef.current) return;
             presupuestosSkipSaveRef.current = true;
+            recordarValor("presupuestos", fila.value || []);
             setPresupuestos(fila.value || []);
             presupuestosUpdatedAtRef.current = fila.updated_at;
             break;
@@ -420,6 +452,8 @@ function AppInner() {
     // conflicto) no lo volvemos a guardar: ya está guardado, es de donde
     // vino. Guardarlo de nuevo es lo que generaba el "rebote" entre pestañas.
     if (eventosSkipSaveRef.current) { eventosSkipSaveRef.current = false; return; }
+    const eventosJson = JSON.stringify(events);
+    if (ultimoJsonRef.current.eventos === eventosJson) return;
     // Traba de seguridad: si antes había eventos guardados y ahora el
     // array está vacío, es mucho más probable que sea un bug (carga
     // fallida, estado pisado, etc.) que un vaciado intencional — nadie
@@ -449,6 +483,7 @@ function AppInner() {
         const fresh = await loadShared("eventos", events);
         if (fresh.ok) {
           eventosSkipSaveRef.current = true;
+          recordarValor("eventos", fresh.value);
           setEvents(fresh.value);
           eventosUpdatedAtRef.current = fresh.updatedAt;
           prevEventsCountRef.current = (fresh.value || []).length;
@@ -457,15 +492,18 @@ function AppInner() {
         return;
       }
       eventosUpdatedAtRef.current = res.updatedAt;
+      ultimoJsonRef.current.eventos = eventosJson;
     }, 150);
     return () => clearTimeout(t);
   }, [events, ready]);
-  useEffect(() => { if (ready) { const t = setTimeout(() => saveShared("jefeAreas", jefeAreas), 900); return () => clearTimeout(t); } }, [jefeAreas, ready]);
-  useEffect(() => { if (ready) { const t = setTimeout(() => saveShared("condicionesContratacion", condicionesContratacion), 900); return () => clearTimeout(t); } }, [condicionesContratacion, ready]);
-  useEffect(() => { if (ready) { const t = setTimeout(() => saveShared("recordatoriosGenerales", recordatoriosGenerales), 900); return () => clearTimeout(t); } }, [recordatoriosGenerales, ready]);
+  useEffect(() => { if (ready) { const t = setTimeout(() => guardarSiCambio("jefeAreas", jefeAreas), 900); return () => clearTimeout(t); } }, [jefeAreas, ready]);
+  useEffect(() => { if (ready) { const t = setTimeout(() => guardarSiCambio("condicionesContratacion", condicionesContratacion), 900); return () => clearTimeout(t); } }, [condicionesContratacion, ready]);
+  useEffect(() => { if (ready) { const t = setTimeout(() => guardarSiCambio("recordatoriosGenerales", recordatoriosGenerales), 900); return () => clearTimeout(t); } }, [recordatoriosGenerales, ready]);
   useEffect(() => {
     if (!ready) return;
     if (planosSkipSaveRef.current) { planosSkipSaveRef.current = false; return; }
+    const planosJson = JSON.stringify(floorplans);
+    if (ultimoJsonRef.current.planos === planosJson) return;
     const t = setTimeout(async () => {
       const res = await saveShared("planos", floorplans, planosUpdatedAtRef.current);
       if (!res.ok) {
@@ -479,6 +517,7 @@ function AppInner() {
         const fresh = await loadShared("planos", floorplans);
         if (fresh.ok) {
           planosSkipSaveRef.current = true;
+          recordarValor("planos", fresh.value);
           setFloorplans(fresh.value);
           planosUpdatedAtRef.current = fresh.updatedAt;
           showToast("⚠️ Otra computadora guardó un plano justo antes que vos — se actualizó con esa versión. Si tu plano no quedó, volvé a armarlo y guardarlo.");
@@ -486,17 +525,20 @@ function AppInner() {
         return;
       }
       planosUpdatedAtRef.current = res.updatedAt;
+      ultimoJsonRef.current.planos = planosJson;
     }, 150);
     return () => clearTimeout(t);
   }, [floorplans, ready]);
-  useEffect(() => { if (ready) { const t = setTimeout(() => saveShared("tarifas", tarifas), 900); return () => clearTimeout(t); } }, [tarifas, ready]);
+  useEffect(() => { if (ready) { const t = setTimeout(() => guardarSiCambio("tarifas", tarifas), 900); return () => clearTimeout(t); } }, [tarifas, ready]);
   // Las notificaciones que la persona ya descartó (tocando la "×") se guardan acá, para que
   // no vuelvan a aparecer cada vez que se abre la app.
-  useEffect(() => { if (ready) { const t = setTimeout(() => saveShared("alertasOcultas", alertasOcultas), 900); return () => clearTimeout(t); } }, [alertasOcultas, ready]);
-  useEffect(() => { if (ready) { const t = setTimeout(() => saveShared("alertasPospuestas", alertasPospuestas), 900); return () => clearTimeout(t); } }, [alertasPospuestas, ready]);
+  useEffect(() => { if (ready) { const t = setTimeout(() => guardarSiCambio("alertasOcultas", alertasOcultas), 900); return () => clearTimeout(t); } }, [alertasOcultas, ready]);
+  useEffect(() => { if (ready) { const t = setTimeout(() => guardarSiCambio("alertasPospuestas", alertasPospuestas), 900); return () => clearTimeout(t); } }, [alertasPospuestas, ready]);
   useEffect(() => {
     if (!ready) return;
     if (presupuestosSkipSaveRef.current) { presupuestosSkipSaveRef.current = false; return; }
+    const presupuestosJson = JSON.stringify(presupuestos);
+    if (ultimoJsonRef.current.presupuestos === presupuestosJson) return;
     const t = setTimeout(async () => {
       const res = await saveShared("presupuestos", presupuestos, presupuestosUpdatedAtRef.current);
       if (!res.ok) {
@@ -511,6 +553,7 @@ function AppInner() {
         const fresh = await loadShared("presupuestos", presupuestos);
         if (fresh.ok) {
           presupuestosSkipSaveRef.current = true;
+          recordarValor("presupuestos", fresh.value);
           setPresupuestos(fresh.value);
           presupuestosUpdatedAtRef.current = fresh.updatedAt;
           showToast("⚠️ Otra pestaña/compu guardó presupuestos justo antes que vos — se actualizó con esa versión. Si tu último cambio no quedó, volvé a hacerlo.");
@@ -518,6 +561,7 @@ function AppInner() {
         return;
       }
       presupuestosUpdatedAtRef.current = res.updatedAt;
+      ultimoJsonRef.current.presupuestos = presupuestosJson;
     }, 150);
     return () => clearTimeout(t);
   }, [presupuestos, ready]);
